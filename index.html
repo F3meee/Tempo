@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tempo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#000000">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kode+Mono:wght@400;500;600&family=Manrope:wght@400;500;700&display=swap">
+<style>
+/* Layout (dal Figma "App tempo"): prima schermata a tutto schermo con il mosaico che scende,
+   righello delle tappe a destra e arco olocenico in basso con la sola data centrale;
+   sotto, la tappa scelta: titolo, tappe dell'epoca, eventi, invenzioni, arte. */
+:root {
+  --bg: #000;
+  --surface: #121314;
+  --ink: #f2f2f2;
+  --muted: #9a9c9e;
+  --soft: #c4c4c4;
+  --line: #2a2b2d;
+  --accent: #fff;
+  --f-mono: "Kode Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --f-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  --max: 760px;
+  --d: min(100vw, 520px);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--f-body); overscroll-behavior-y: none; }
+img { max-width: 100%; display: block; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Prima schermata ---------- */
+.stage {
+  position: relative; height: calc(100svh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  min-height: 560px; overflow: hidden; background: #000; color: #fff; isolation: isolate;
+  user-select: none; -webkit-user-select: none;
+}
+.mosaic { position: absolute; inset: 0 -10%; z-index: -2; }
+.layer { position: absolute; inset: 0; display: flex; gap: 6px; opacity: 0; transition: opacity 1s ease; }
+.layer.in { opacity: 1; }
+.col { flex: 1 1 0; min-width: 0; overflow: hidden; }
+.track { animation: fall var(--dur, 70s) linear infinite; will-change: transform; }
+.track > * { margin-bottom: 6px; }
+@keyframes fall { from { transform: translateY(-50%); } to { transform: translateY(0); } }
+
+/* Tessera: sostituisce la foto quando non si può caricare. Colori dell'epoca. */
+.tile {
+  position: relative; width: 100%; max-width: 100%; overflow: hidden; border-radius: 2px;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255,255,255,.09) 1px, transparent 1.4px) 0 0 / 5px 5px,
+    linear-gradient(160deg, var(--a), var(--b));
+  color: #fff; display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 10px; font-family: var(--f-mono); text-transform: uppercase;
+}
+.tile .k { font-size: 9px; letter-spacing: .14em; opacity: .7; margin-bottom: 4px; }
+.tile .l { font-size: var(--fs, 15px); line-height: 1.05; letter-spacing: .02em; overflow-wrap: anywhere; }
+.track .tile { filter: brightness(.6) saturate(.85); }
+.ph { width: 100%; object-fit: cover; background: #1b1c1d; filter: saturate(.85) brightness(.85); }
+
+.shade {
+  position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.75), transparent 20%),
+    linear-gradient(90deg, transparent 49%, rgba(0,0,0,.85) 100%),
+    linear-gradient(180deg, transparent 50%, rgba(0,0,0,.92) 76%, #000 100%);
+}
+.top { position: absolute; left: var(--gutter-l); right: 90px; top: 18px; font-family: var(--f-mono); }
+.brand { color: #fff; text-decoration: none; font-size: 13px; letter-spacing: .32em; text-transform: uppercase; }
+.era-line { margin: 6px 0 0; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.65); }
+
+/* Righello: una tacca per tappa, più lunga dove cambia l'epoca. */
+.ruler {
+  position: absolute; right: max(22px, env(safe-area-inset-right, 0px)); top: 11.5%; height: 58%;
+  width: 45px; display: flex; flex-direction: column; align-items: flex-end;
+  font: 10px/15px var(--f-mono); color: #fff; touch-action: none; cursor: ns-resize;
+}
+.r-label { width: 41px; text-align: center; }
+.r-track { position: relative; flex: 1; width: 37px; }
+.r-tick { position: absolute; right: 0; height: 1px; width: 14px; background: rgba(255,255,255,.5); }
+.r-tick.era { width: 30px; background: rgba(255,255,255,.9); }
+.r-mark {
+  position: absolute; right: 0; width: 37px; height: 2px; margin-top: -1px; background: #fff;
+  box-shadow: 0 0 6px rgba(255,255,255,.6); transition: top .25s ease;
+}
+.ruler.drag .r-mark { transition: none; }
+.r-tip {
+  position: absolute; right: 44px; transform: translateY(-50%); white-space: nowrap;
+  font: 10px/1 var(--f-mono); color: #fff; background: rgba(0,0,0,.75); padding: 4px 6px; border-radius: 3px;
+  opacity: 0; transition: opacity .2s;
+}
+.ruler.drag .r-tip { opacity: 1; }
+
+.dial {
+  position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: var(--d); height: calc(var(--d) * 230 / 402);
+  touch-action: pan-y; cursor: grab; font-family: var(--f-mono);
+}
+.dial.drag { cursor: grabbing; }
+.dial-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.dial-ring { fill: none; stroke: rgba(255,255,255,.8); stroke-width: 1; }
+.dial-svg line { stroke: rgba(255,255,255,.45); stroke-width: 1; }
+.dial-svg line.big { stroke: rgba(255,255,255,.9); }
+.dot { fill: #fff; }
+.dial button { background: none; border: 0; padding: 0; color: inherit; }
+.dial-year {
+  position: absolute; left: 50%; top: calc(53 / 230 * 100%); transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; line-height: 1;
+}
+.dial-year .he { font-size: calc(var(--d) * 36 / 402); color: #fff; letter-spacing: .01em; font-variant-numeric: tabular-nums; }
+.real { font-size: 10px; color: rgba(255,255,255,.6); margin-bottom: calc(var(--d) * 6 / 402); white-space: nowrap; }
+.down {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  font: 10px/1 var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.55); padding: 8px 10px;
+}
+.hint {
+  position: absolute; left: 50%; bottom: calc(var(--d) * 230 / 402 + 4px); transform: translateX(-50%);
+  font: 10px/1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.5);
+  white-space: nowrap; transition: opacity .6s;
+}
+.hint.gone { opacity: 0; }
+
+/* ---------- Sezioni ---------- */
+main { padding-bottom: 40px; }
+.wrap { max-width: var(--max); margin: 0 auto; padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+.period { padding-block: 26px 0; }
+.period .range { font: 500 11px/1 var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.period h1 { margin: 0; font: 500 30px/1.1 var(--f-mono); letter-spacing: .02em; text-wrap: balance; }
+.stops { margin-top: 22px; }
+.stops-head { font: 500 11px/1 var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.chips button {
+  border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 9px 4px;
+  font: 400 12px/1 var(--f-mono); color: var(--soft); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.chips button[aria-current="true"] { background: #fff; color: #000; border-color: #fff; }
+.enav { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.enav button { border: 0; background: none; font: 400 11px/1.3 var(--f-mono); letter-spacing: .08em; color: var(--muted); padding: 6px 0; text-transform: uppercase; text-align: left; }
+.enav button + button { text-align: right; }
+.enav button[disabled] { visibility: hidden; }
+
+.block { padding-block: 34px 4px; }
+.block-head {
+  display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.5);
+  padding-bottom: 8px; margin-bottom: 18px;
+}
+.block-head h2 { margin: 0; font: 500 17px/1.1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; text-wrap: balance; }
+.count { font: 400 11px/1 var(--f-mono); color: var(--muted); white-space: nowrap; margin-left: auto; }
+.date {
+  display: block; font: 500 11px/1.3 var(--f-mono); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--soft); margin-bottom: 4px;
+}
+.events { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
+.events li { display: grid; gap: 10px; }
+.events li.lead .vis { aspect-ratio: 16 / 10; }
+.events li:not(.lead) { border-left: 1px solid rgba(255,255,255,.35); padding-left: 14px; }
+.events p { margin: 0; font-size: 17px; line-height: 1.45; max-width: 60ch; }
+.events li.lead p { font-size: 20px; line-height: 1.35; }
+.events .extra p { font-size: 15px; }
+.open {
+  all: unset; display: block; cursor: pointer; border-radius: 4px;
+}
+.open:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.wk { font: 400 10px/1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-top: 6px; display: inline-block; }
+.vis { width: 100%; max-width: 100%; border-radius: 6px; overflow: hidden; }
+.vis .tile { height: 100%; padding: 14px; }
+.vis .tile .l { --fs: 26px; }
+.vis img { width: 100%; height: 100%; object-fit: cover; }
+.more {
+  margin-top: 18px; border: 1px solid rgba(255,255,255,.6); background: transparent; border-radius: 999px;
+  padding: 10px 18px; font: 500 12px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase;
+}
+.more:hover { background: #fff; color: #000; }
+
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.list .open { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: center; font-size: 15px; line-height: 1.35; }
+.list .thumb { width: 64px; height: 64px; border-radius: 6px; overflow: hidden; }
+.list .thumb .tile { height: 100%; padding: 6px; }
+.list .thumb .tile .l { --fs: 9px; }
+.list .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.list strong { font-weight: 700; display: block; }
+.list span.desc { color: var(--muted); font-size: 14px; }
+
+.foot { margin-top: 44px; color: var(--muted); font-size: 13px; line-height: 1.5; padding-block: 16px; border-top: 1px solid var(--line); }
+.foot p { margin: 0 0 8px; max-width: 62ch; }
+
+/* Scheda Wikipedia */
+.sheet {
+  border: 1px solid var(--line); border-radius: 14px; background: #0c0c0d; color: var(--ink);
+  padding: 0; width: min(560px, calc(100vw - 24px)); max-height: 86vh; overflow: auto;
+}
+.sheet::backdrop { background: rgba(0,0,0,.75); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.sheet .pic { aspect-ratio: 16 / 10; background: var(--surface); }
+.sheet .pic img, .sheet .pic .tile { width: 100%; height: 100%; object-fit: cover; }
+.sheet .pic .tile .l { --fs: 24px; }
+.sheet .body { padding: 18px 18px 20px; }
+.sheet h3 { margin: 0 0 4px; font: 500 20px/1.2 var(--f-mono); }
+.sheet .src { font: 400 10px/1 var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+.sheet .txt { margin: 0; font-size: 16px; line-height: 1.55; }
+.sheet .row { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; flex-wrap: wrap; }
+.sheet a.go { text-decoration: none; display: inline-block; }
+
+/* Finestra "vai all'anno" */
+.ask {
+  border: 1px solid var(--line); border-radius: 12px; background: #0c0c0d; color: #fff;
+  padding: 22px; width: min(340px, calc(100vw - 32px)); font-family: var(--f-mono);
+}
+.ask::backdrop { background: rgba(0,0,0,.7); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.ask-title { margin: 0 0 14px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.ask-row { display: flex; gap: 8px; align-items: stretch; }
+.ask-row.end { margin-top: 18px; justify-content: flex-end; }
+.ask input {
+  flex: 1; min-width: 0; padding: 8px 10px; font: 400 30px/1 var(--f-mono); text-align: center;
+  background: #000; color: #fff; border: 1px solid var(--line); border-radius: 8px; font-variant-numeric: tabular-nums;
+}
+.era { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.era button { flex: 1; border: 0; background: #000; padding: 4px 10px; font: 400 12px/1 var(--f-mono); color: var(--muted); }
+.era button[aria-pressed="true"] { background: #fff; color: #000; }
+.ask-he { margin: 10px 0 0; font-size: 11px; color: rgba(255,255,255,.55); min-height: 1.3em; }
+.go, .ghost { border-radius: 999px; padding: 10px 18px; font: 500 12px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; }
+.go { border: 0; background: #fff; color: #000; }
+.ghost { border: 1px solid var(--line); background: transparent; color: var(--muted); }
+
+.swap { animation: fade .45s ease both; }
+@keyframes fade { from { opacity: .2; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+
+<section class="stage" id="stage" aria-label="Scegli il periodo">
+  <div class="mosaic" id="mosaic" aria-hidden="true"></div>
+  <div class="shade" aria-hidden="true"></div>
+  <header class="top">
+    <a class="brand" href="#1950" id="brand">Tempo</a>
+    <p class="era-line" id="eraLine"></p>
+  </header>
+  <nav class="ruler" id="ruler" aria-label="Posizione nella storia">
+    <span class="r-label">1</span>
+    <div class="r-track" id="rTrack"><div class="r-mark" id="rMark"></div></div>
+    <span class="r-label">oggi</span>
+  </nav>
+  <p class="hint" id="hint">← trascina l'arco →</p>
+  <div class="dial" id="dial">
+    <svg class="dial-svg" viewBox="0 0 402 230" aria-hidden="true">
+      <circle cx="201" cy="314" r="201" class="dial-ring"/>
+      <g id="dialTicks"></g>
+      <circle cx="201" cy="113" r="3" class="dot"/>
+    </svg>
+    <button type="button" class="dial-year" id="yearBtn" aria-label="Scrivi un anno">
+      <span class="real" id="realYear"></span>
+      <span class="he" id="heYear"></span>
+    </button>
+    <button type="button" class="down" id="down">Eventi ↓</button>
+  </div>
+</section>
+
+<main id="main">
+  <div class="wrap">
+    <section class="period">
+      <p class="range" id="pRange"></p>
+      <h1 id="pName"></h1>
+      <div class="stops">
+        <p class="stops-head" id="stopsHead"></p>
+        <div class="chips" id="chips"></div>
+        <div class="enav"><button type="button" id="eraPrev"></button><button type="button" id="eraNext"></button></div>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Eventi principali</h2><span class="count" id="eCount"></span></div>
+      <ol class="events" id="events"></ol>
+      <button class="more" id="eMore" hidden></button>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Invenzioni e scoperte</h2><span class="count" id="iCount"></span></div>
+      <ul class="list" id="inventions"></ul>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Arte e cultura</h2><span class="count" id="aCount"></span></div>
+      <ul class="list" id="art"></ul>
+    </section>
+
+    <footer class="foot">
+      <p id="photoNote"></p>
+      <p>Tocca un evento, un'invenzione o un'opera per leggere il riassunto della voce di Wikipedia. Le date antiche sono approssimate (c. = circa). Il numero grande è l'anno di inizio della tappa nel calendario olocenico: anno d.C. + 10.000.</p>
+    </footer>
+  </div>
+</main>
+
+<dialog class="sheet" id="sheet">
+  <div class="pic" id="shPic"></div>
+  <div class="body">
+    <h3 id="shTitle"></h3>
+    <p class="src" id="shSrc"></p>
+    <p class="txt" id="shTxt"></p>
+    <div class="row">
+      <button type="button" class="ghost" id="shClose">Chiudi</button>
+      <a class="go" id="shLink" href="#" target="_blank" rel="noopener">Apri su Wikipedia</a>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="ask" id="ask">
+  <form id="picker" autocomplete="off">
+    <p class="ask-title">Vai all'anno</p>
+    <div class="ask-row">
+      <label for="yearInput" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Anno</label>
+      <input id="yearInput" inputmode="numeric" pattern="[0-9]*" maxlength="5" value="1969">
+      <div class="era" role="group" aria-label="Era">
+        <button type="button" id="eraBC" aria-pressed="false">a.C.</button>
+        <button type="button" id="eraAD" aria-pressed="true">d.C.</button>
+      </div>
+    </div>
+    <p class="ask-he" id="askHe"></p>
+    <div class="ask-row end">
+      <button type="button" class="ghost" id="askClose">Annulla</button>
+      <button type="submit" class="go">Vai</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const RAW = /*DATA*/"@-10000|-9000|La fine dell'era glaciale\nE c. 9700 a.C.|Finisce l'ultima glaciazione: inizia l'Olocene, l'epoca geologica in cui viviamo ancora oggi|Olocene\nE c. 9600 a.C.|In Anatolia si innalzano i pilastri di Göbekli Tepe, il più antico santuario monumentale conosciuto|Göbekli Tepe\nE c. 9500 a.C.|Nel Levante i Natufiani vivono in villaggi stabili e raccolgono cereali selvatici|Cultura natufiana\nE c. 9500 a.C.|Gli Urali vedono nascere l'idolo di Shigir, la più antica scultura in legno|Idolo di Shigir\nE c. 9000 a.C.|Primi insediamenti a Gerico, una delle città abitate più antiche|Gerico\nE c. 9000 a.C.|Cacciatori della cultura Clovis e di altri gruppi si diffondono nelle Americhe|Cultura Clovis\nI Macine e falcetti|i Natufiani lavorano i cereali selvatici|Cultura natufiana\nI Ceramica Jōmon|in Giappone si usano già vasi di terracotta|Periodo Jōmon\nA Pilastri di Göbekli Tepe|animali scolpiti su blocchi di pietra alti fino a 5 metri|Göbekli Tepe\nA Idolo di Shigir|statua in legno di larice con volti incisi|Idolo di Shigir\n@-9000|-8000|Nasce l'agricoltura\nE c. 9000 a.C.|Nella Mezzaluna fertile si coltivano i primi cereali: farro, grano monococco, orzo|Mezzaluna fertile\nE c. 8500 a.C.|Pecore e capre vengono addomesticate sui monti Zagros|Addomesticamento\nE c. 8000 a.C.|Gerico si circonda di mura e costruisce la sua torre di pietra|Torre di Gerico\nE c. 8500 a.C.|Lenticchie, piselli e ceci entrano nei campi del Vicino Oriente|Rivoluzione neolitica\nE c. 8000 a.C.|Il livello del mare sale con lo scioglimento dei ghiacci e cambia le coste del mondo|Olocene\nI Agricoltura|si seminano e raccolgono piante scelte|Agricoltura\nI Allevamento|gli animali vengono tenuti vicino ai villaggi|Allevamento\nA Torre di Gerico|torre di pietra alta 8 metri, la più antica conosciuta|Torre di Gerico\n@-8000|-7000|I primi villaggi agricoli\nE c. 7400 a.C.|Nasce Çatalhöyük in Anatolia, grande villaggio di case attaccate con l'ingresso dal tetto|Çatalhöyük\nE c. 7000 a.C.|Nella valle dello Yangtze si coltiva il riso|Riso\nE c. 7000 a.C.|A Mehrgarh, in Pakistan, sorge uno dei primi villaggi agricoli dell'Asia meridionale|Mehrgarh\nE c. 7000 a.C.|A Jiahu, in Cina, si suonano flauti ricavati da ossa di gru|Jiahu\nE c. 8000 a.C.|Si addomesticano i bovini e i maiali|Bos taurus\nE c. 7000 a.C.|In Messico inizia la coltivazione dell'antenato del mais|Mais\nI Flauti di Jiahu|tra i più antichi strumenti musicali suonabili|Jiahu\nI Mattoni crudi|case di fango essiccato al sole|Mattone crudo\nA Pitture di Çatalhöyük|scene di caccia e geometrie sulle pareti delle case|Çatalhöyük\n@-7000|-6000|Ceramica e nuove terre\nE c. 6500 a.C.|L'agricoltura arriva in Grecia e nei Balcani: inizia il Neolitico europeo|Neolitico\nE c. 6200 a.C.|Un brusco raffreddamento del clima colpisce il mondo per circa due secoli|Evento climatico 8200 BP\nE c. 6200 a.C.|Lo tsunami di Storegga e il mare che sale sommergono il Doggerland: la Gran Bretagna diventa un'isola|Doggerland\nE c. 6500 a.C.|Si diffonde la ceramica in tutto il Vicino Oriente|Ceramica\nE c. 6500 a.C.|A 'Ain Ghazal, in Giordania, si modellano grandi statue in gesso|'Ain Ghazal\nI Ceramica|vasi cotti per conservare e cucinare|Ceramica\nI Tessitura|primi tessuti di lino|Tessitura\nA Statue di 'Ain Ghazal|figure umane in gesso con occhi dipinti|'Ain Ghazal\n@-6000|-5000|Fiumi e irrigazione\nE c. 5500 a.C.|La cultura della ceramica lineare porta i campi lungo il Danubio e in Europa centrale|Cultura della ceramica lineare\nE c. 5500 a.C.|In Mesopotamia si scavano i primi canali per irrigare i campi|Irrigazione\nE c. 5400 a.C.|Si fonda Eridu, che i Sumeri ricorderanno come la prima città|Eridu\nE c. 5000 a.C.|In Cina fiorisce la cultura di Yangshao lungo il Fiume Giallo|Cultura di Yangshao\nE c. 5000 a.C.|A Belovode, in Serbia, si fonde il rame dal minerale|Età del rame\nI Irrigazione|l'acqua dei fiumi arriva ai campi|Irrigazione\nI Fusione del rame|il primo metallo lavorato con il fuoco|Rame\nA Ceramica di Samarra|vasi dipinti con disegni a spirale|Cultura di Samarra\n@-5000|-4000|L'età del rame\nE c. 4500 a.C.|Nella necropoli di Varna si depongono i più antichi oggetti d'oro lavorato|Necropoli di Varna\nE c. 4500 a.C.|In Bretagna si allineano i menhir di Carnac|Allineamenti di Carnac\nE c. 5000 a.C.|La cultura di Ubaid diffonde villaggi e templi in Mesopotamia|Periodo di Ubaid\nE c. 4500 a.C.|L'aratro trainato da animali compare in Mesopotamia|Aratro\nE c. 4000 a.C.|Nella valle del Nilo nascono le culture predinastiche|Periodo predinastico egizio\nI Lavorazione dell'oro|gioielli e scettri della necropoli di Varna|Necropoli di Varna\nI Vela|barche a vela sui fiumi della Mesopotamia|Vela\nA Pensatore di Hamangia|statuetta in terracotta seduta con la testa tra le mani|Pensatore di Hamangia\nA Tesoro di Varna|il più antico oro lavorato del mondo|Necropoli di Varna\n@-4000|-3000|Città, ruota e scrittura\nE c. 3300 a.C.|A Uruk nasce la scrittura cuneiforme su tavolette d'argilla|Cuneiforme\nE c. 3100 a.C.|Il re Narmer unisce Alto e Basso Egitto|Narmer\nE c. 3500 a.C.|Uruk diventa la prima grande città della storia|Uruk\nE c. 3500 a.C.|Si inventa la ruota, prima per il vasaio, poi per i carri|Ruota\nE c. 3300 a.C.|Muore sulle Alpi Ötzi, l'uomo del Similaun|Mummia del Similaun\nE c. 3200 a.C.|In Irlanda si costruisce il tumulo di Newgrange|Newgrange\nE c. 3500 a.C.|Nelle steppe del Kazakistan si addomestica il cavallo|Cultura di Botai\nI Scrittura|i segni cuneiformi registrano conti e raccolti|Scrittura\nI Ruota|cambia il trasporto e la lavorazione dei vasi|Ruota\nI Bronzo|rame e stagno fusi insieme|Età del bronzo\nA Tavolozza di Narmer|il re con la corona dell'Egitto unito|Tavolozza di Narmer\nA Vaso di Uruk|processione di offerte alla dea Inanna|Vaso di Uruk\nA Newgrange|il sole d'inverno entra nel corridoio della tomba|Newgrange\n@-3000|-2750|Le prime dinastie\nE c. 3000 a.C.|In Egitto regnano le prime dinastie di faraoni, con capitale a Menfi|Periodo protodinastico dell'Egitto\nE c. 2900 a.C.|In Mesopotamia le città-stato sumere come Ur, Lagash e Kish si contendono il potere|Sumeri\nE c. 3000 a.C.|In Inghilterra si scava il primo recinto di Stonehenge|Stonehenge\nE c. 2700 a.C.|Regna a Uruk Gilgamesh, che diventerà eroe del primo grande poema|Gilgameš\nE c. 2900 a.C.|Si fonda la prima Troia sulla collina di Hisarlik|Troia\nI Papiro|il supporto per scrivere degli Egizi|Papiro\nI Calendario egizio|365 giorni regolati sulle piene del Nilo|Calendario egizio\nA Idoli cicladici|figure di marmo stilizzate delle isole Cicladi|Arte cicladica\nA Stonehenge|il primo cerchio di terra e pietre|Stonehenge\n@-2750|-2500|L'età delle piramidi\nE c. 2560 a.C.|Si completa la Grande Piramide di Cheope a Giza|Piramide di Cheope\nE c. 2670 a.C.|L'architetto Imhotep costruisce per Djoser la piramide a gradoni|Piramide di Djoser\nE c. 2600 a.C.|Fioriscono Mohenjo-daro e Harappa, città della valle dell'Indo|Civiltà della valle dell'Indo\nE c. 2600 a.C.|A Ur si scavano le tombe reali con il loro tesoro|Cimitero reale di Ur\nE c. 2500 a.C.|A Stonehenge si innalzano i grandi blocchi di arenaria|Stonehenge\nE c. 2500 a.C.|Si scolpisce la Grande Sfinge di Giza|Sfinge di Giza\nI Ingegneria delle piramidi|milioni di blocchi tagliati e allineati|Piramidi egizie\nI Fognature di Mohenjo-daro|città con scarichi e bagni|Mohenjo-daro\nA Stendardo di Ur|guerra e pace in madreperla e lapislazzuli|Stendardo di Ur\nA Grande Sfinge|leone con il volto di un faraone|Sfinge di Giza\n@-2500|-2250|Il primo impero\nE c. 2334 a.C.|Sargon di Akkad unisce la Mesopotamia nel primo impero della storia|Sargon di Akkad\nE c. 2400 a.C.|A Ebla, in Siria, si conserva un archivio di migliaia di tavolette|Ebla\nE c. 2350 a.C.|Nelle piramidi si incidono i Testi delle Piramidi, i più antichi testi religiosi|Testi delle piramidi\nE c. 2450 a.C.|Lagash celebra la vittoria su Umma con la Stele degli avvoltoi|Stele degli avvoltoi\nE c. 2300 a.C.|Enheduanna, figlia di Sargon, è la prima autrice di cui conosciamo il nome|Enheduanna\nI Archivi di tavolette|la burocrazia di Ebla|Ebla\nI Unità di misura|pesi e misure comuni nell'impero di Akkad|Impero accadico\nA Stele di Naram-Sin|il re di Akkad sale vittorioso su un monte|Stele di Naram-Sin\nA Inni di Enheduanna|poesie alla dea Inanna|Enheduanna\n@-2250|-2000|Ur e i codici\nE c. 2150 a.C.|L'impero di Akkad crolla, anche per una lunga siccità|Impero accadico\nE c. 2100 a.C.|Ur-Nammu di Ur scrive il più antico codice di leggi conosciuto|Codice di Ur-Nammu\nE c. 2100 a.C.|A Ur si costruisce la grande ziggurat|Ziggurat di Ur\nE c. 2055 a.C.|Mentuhotep II riunifica l'Egitto: inizia il Medio Regno|Medio Regno\nE c. 2100 a.C.|Si mettono per iscritto i primi racconti sumeri di Gilgamesh|Epopea di Gilgameš\nI Codice di leggi|pene e risarcimenti scritti|Codice di Ur-Nammu\nA Ziggurat di Ur|una montagna di mattoni per il dio Luna|Ziggurat di Ur\nA Statue di Gudea|il principe di Lagash in pietra nera|Gudea\n@-2000|-1750|Babilonia e Creta\nE c. 1754 a.C.|Hammurabi di Babilonia fa incidere il suo codice su una stele|Codice di Hammurabi\nE c. 1950 a.C.|A Creta si costruisce il palazzo di Cnosso: fiorisce la civiltà minoica|Cnosso\nE c. 1900 a.C.|La civiltà della valle dell'Indo entra in declino|Civiltà della valle dell'Indo\nE c. 1900 a.C.|In Cina sorge Erlitou, legata alla leggendaria dinastia Xia|Cultura di Erlitou\nE c. 1800 a.C.|Gli Assiri commerciano stagno e tessuti fino in Anatolia|Kültepe\nI Matematica babilonese|numeri in base 60, come i nostri minuti|Matematica babilonese\nI Alfabeto|nel Sinai nasce la prima scrittura alfabetica|Alfabeto protosinaitico\nA Codice di Hammurabi|stele di basalto con 282 leggi|Codice di Hammurabi\nA Palazzo di Cnosso|corridoi e affreschi del \"labirinto\"|Cnosso\n@-1750|-1500|Carri e vulcani\nE c. 1650 a.C.|Gli Hyksos prendono il potere nel nord dell'Egitto|Hyksos\nE c. 1600 a.C.|L'eruzione di Thera seppellisce Akrotiri e colpisce la civiltà minoica|Eruzione minoica\nE 1595 a.C.|Gli Ittiti saccheggiano Babilonia|Ittiti\nE c. 1600 a.C.|In Cina inizia la dinastia Shang|Dinastia Shang\nE c. 1550 a.C.|Ahmose caccia gli Hyksos: inizia il Nuovo Regno egizio|Nuovo Regno\nE c. 1550 a.C.|A Micene si seppelliscono i re nelle tombe a fossa|Micene\nI Carro da guerra|ruote a raggi e cavalli cambiano gli eserciti|Carro (antichità)\nI Disco di Nebra|la più antica rappresentazione del cielo|Disco di Nebra\nA Maschera di Agamennone|maschera funeraria d'oro di Micene|Maschera di Agamennone\nA Affreschi di Akrotiri|scene di mare e di festa a Santorini|Akrotiri (Santorini)\n@-1500|-1250|L'Egitto dei grandi faraoni\nE c. 1479 a.C.|Hatshepsut diventa faraone e regna per vent'anni|Hatshepsut\nE 1457 a.C.|Thutmose III vince a Megiddo: l'Egitto domina il Levante|Battaglia di Megiddo (XV secolo a.C.)\nE c. 1350 a.C.|Akhenaton impone il culto del solo dio Aton e fonda Amarna|Akhenaton\nE c. 1323 a.C.|Muore giovane il faraone Tutankhamon|Tutankhamon\nE 1274 a.C.|Ramses II e gli Ittiti si scontrano a Qadesh|Battaglia di Qadesh\nE c. 1250 a.C.|A Micene si costruisce la Porta dei Leoni|Porta dei Leoni\nE c. 1500 a.C.|In India si compongono gli inni del Rigveda|Rigveda\nI Lavorazione del ferro|gli Ittiti lo sanno lavorare|Età del ferro\nI Vetro|i primi vasi di vetro in Egitto e Mesopotamia|Vetro\nA Busto di Nefertiti|il ritratto della regina di Amarna|Busto di Nefertiti\nA Maschera di Tutankhamon|oro e pietre dure dalla tomba del faraone|Maschera funeraria di Tutankhamon\nA Abu Simbel|i templi scolpiti nella roccia da Ramses II|Abu Simbel\n@-1250|-1000|Il crollo dell'età del bronzo\nE c. 1177 a.C.|I \"Popoli del mare\" e una serie di crisi fanno crollare i regni del Mediterraneo|Collasso dell'età del bronzo\nE c. 1200 a.C.|Secondo la tradizione, i Greci assediano e distruggono Troia|Guerra di Troia\nE c. 1046 a.C.|Gli Zhou rovesciano gli Shang in Cina|Dinastia Zhou\nE c. 1050 a.C.|I Fenici usano un alfabeto di 22 lettere|Alfabeto fenicio\nE c. 1200 a.C.|In Messico gli Olmechi costruiscono San Lorenzo|Olmechi\nE c. 1000 a.C.|Davide diventa re d'Israele|Davide\nI Alfabeto fenicio|il padre degli alfabeti greco e latino|Alfabeto fenicio\nI Età del ferro|il ferro sostituisce il bronzo|Età del ferro\nA Teste colossali olmeche|volti di basalto alti fino a 3 metri|Teste colossali olmeche\nA Iscrizioni su ossa oracolari|la più antica scrittura cinese|Ossa oracolari\n@-1000|-750|Fenici, Greci, Etruschi\nE c. 950 a.C.|Salomone costruisce il Tempio di Gerusalemme|Tempio di Salomone\nE c. 814 a.C.|I Fenici di Tiro fondano Cartagine|Cartagine\nE 776 a.C.|Si tengono i primi Giochi olimpici|Giochi olimpici antichi\nE 753 a.C.|Secondo la tradizione, Romolo fonda Roma|Fondazione di Roma\nE c. 900 a.C.|In Italia centrale fiorisce la civiltà villanoviana, poi etrusca|Etruschi\nE c. 900 a.C.|L'Assiria diventa la prima potenza del Vicino Oriente|Impero neo-assiro\nI Alfabeto greco|i Greci aggiungono le vocali|Alfabeto greco\nI Trireme|le navi da guerra a tre ordini di remi|Trireme\nA Iliade e Odissea|i poemi attribuiti a Omero|Omero\nA Rilievi assiri|leoni e battaglie nei palazzi di Nimrud|Nimrud\n@-750|-500|Profeti e filosofi\nE 587 a.C.|Nabucodonosor distrugge Gerusalemme e deporta gli Ebrei a Babilonia|Cattività babilonese\nE 539 a.C.|Ciro il Grande conquista Babilonia: nasce l'impero persiano|Ciro il Grande\nE c. 528 a.C.|Siddhartha Gautama, il Buddha, inizia la sua predicazione|Gautama Buddha\nE 551 a.C.|Nasce Confucio|Confucio\nE 509 a.C.|Roma caccia l'ultimo re e diventa una repubblica|Repubblica romana\nE 508 a.C.|Clistene introduce la democrazia ad Atene|Clistene\nE c. 600 a.C.|Talete di Mileto apre la filosofia greca|Talete\nI Moneta|in Lidia si coniano le prime monete|Moneta\nI Teorema di Pitagora|la scuola di Pitagora a Crotone|Teorema di Pitagora\nA Porta di Ishtar|mattoni blu smaltati di Babilonia|Porta di Ishtar\nA Poesie di Saffo|la poetessa di Lesbo|Saffo\nA Kouroi|le statue di giovani della Grecia arcaica|Kouros\n@-500|-250|La Grecia classica e Alessandro\nE 490 a.C.|Gli Ateniesi battono i Persiani a Maratona|Battaglia di Maratona\nE 480 a.C.|Termopili e Salamina: la Grecia ferma l'invasione persiana|Battaglia di Salamina\nE 447 a.C.|Pericle fa costruire il Partenone|Partenone\nE 431 a.C.|Atene e Sparta si scontrano nella guerra del Peloponneso|Guerra del Peloponneso\nE 399 a.C.|Socrate è condannato a morte ad Atene|Socrate\nE 334 a.C.|Alessandro Magno parte alla conquista dell'impero persiano|Alessandro Magno\nE c. 285 a.C.|Ad Alessandria nasce la grande Biblioteca|Biblioteca di Alessandria\nE 264 a.C.|Inizia la prima guerra punica tra Roma e Cartagine|Prima guerra punica\nI Elementi di Euclide|la geometria per i successivi 2000 anni|Elementi (Euclide)\nI Medicina di Ippocrate|la malattia ha cause naturali|Ippocrate\nA Partenone|il tempio di Atena sull'Acropoli|Partenone\nA Tragedie greche|Eschilo, Sofocle, Euripide|Tragedia greca\nA La Repubblica|dialogo di Platone|La Repubblica (Platone)\n@-250|1|Roma conquista il Mediterraneo\nE 216 a.C.|Annibale annienta i Romani a Canne|Battaglia di Canne\nE 221 a.C.|Qin Shi Huang unifica la Cina e diventa il primo imperatore|Qin Shi Huang\nE 146 a.C.|Roma distrugge Cartagine e Corinto|Terza guerra punica\nE 73 a.C.|Spartaco guida la rivolta degli schiavi|Spartaco\nE 44 a.C.|Giulio Cesare viene ucciso alle idi di marzo|Giulio Cesare\nE 27 a.C.|Ottaviano diventa Augusto, primo imperatore di Roma|Augusto\nE c. 130 a.C.|Si apre la Via della seta tra Cina e Occidente|Via della seta\nE c. 4 a.C.|Nasce Gesù di Nazaret|Gesù\nI Archimede|leve, spinta idrostatica e macchine da guerra|Archimede\nI Meccanismo di Anticitera|un calcolatore astronomico a ingranaggi|Macchina di Anticitera\nI Calendario giuliano|Cesare introduce l'anno di 365 giorni e un quarto|Calendario giuliano\nA Esercito di terracotta|8.000 soldati nella tomba del primo imperatore|Esercito di terracotta\nA Venere di Milo|statua ellenistica di Afrodite|Venere di Milo\nA Eneide|il poema di Virgilio su Enea|Eneide\n@1|250|L'impero romano\nE 9|Nella foresta di Teutoburgo i Germani distruggono tre legioni|Battaglia della foresta di Teutoburgo\nE c. 30|Gesù viene crocifisso a Gerusalemme|Crocifissione di Gesù\nE 64|Un grande incendio devasta Roma|Grande incendio di Roma\nE 79|Il Vesuvio seppellisce Pompei ed Ercolano|Eruzione del Vesuvio del 79\nE 80|Si inaugura il Colosseo|Colosseo\nE 117|Sotto Traiano l'impero raggiunge la massima estensione|Traiano\nE 122|In Britannia si costruisce il Vallo di Adriano|Vallo di Adriano\nE 212|Caracalla dà la cittadinanza romana a tutti gli uomini liberi dell'impero|Constitutio Antoniniana\nI Carta|in Cina Cai Lun la produce dalle fibre vegetali|Carta\nI Almagesto|Tolomeo descrive l'universo con la Terra al centro|Almagesto\nI Calcestruzzo romano|cupole e porti che durano millenni|Calcestruzzo romano\nA Pantheon|la cupola più grande del mondo antico|Pantheon (Roma)\nA Colonna Traiana|la conquista della Dacia a spirale|Colonna di Traiano\nA Metamorfosi|il poema di Ovidio|Metamorfosi (Ovidio)\n@250|500|La fine dell'impero d'Occidente\nE 313|Con l'editto di Milano Costantino concede la libertà di culto ai cristiani|Editto di Milano\nE 330|Costantino inaugura Costantinopoli, la nuova Roma|Costantinopoli\nE 380|Teodosio fa del cristianesimo la religione dello Stato|Editto di Tessalonica\nE 395|L'impero si divide definitivamente in Oriente e Occidente|Impero romano d'Occidente\nE 410|I Visigoti di Alarico saccheggiano Roma|Sacco di Roma (410)\nE 452|Attila e gli Unni invadono l'Italia|Attila\nE 476|Odoacre depone Romolo Augusto: finisce l'impero romano d'Occidente|Caduta dell'Impero romano d'Occidente\nE c. 320|In India inizia l'età d'oro dell'impero Gupta|Impero Gupta\nI Numeri di Aryabhata|astronomia e matematica indiana|Aryabhata\nI Codice|il libro a pagine sostituisce il rotolo|Codice (filologia)\nA Arco di Costantino|l'arco di trionfo vicino al Colosseo|Arco di Costantino\nA Confessioni|l'autobiografia di Agostino d'Ippona|Confessioni (Agostino)\nA Mausoleo di Galla Placidia|i mosaici stellati di Ravenna|Mausoleo di Galla Placidia\n@500|600|Giustiniano e i Longobardi\nE 529|Benedetto da Norcia fonda il monastero di Montecassino|Abbazia di Montecassino\nE 534|Giustiniano completa il Corpus iuris civilis, base del diritto europeo|Corpus iuris civilis\nE 537|A Costantinopoli si consacra Santa Sofia|Basilica di Santa Sofia\nE 541|La peste di Giustiniano colpisce il Mediterraneo|Peste di Giustiniano\nE 568|I Longobardi di Alboino invadono l'Italia|Longobardi\nE 589|La dinastia Sui riunifica la Cina|Dinastia Sui\nE 590|Gregorio Magno diventa papa|Papa Gregorio I\nI Seta a Bisanzio|due monaci portano i bachi dalla Cina|Seta\nA Mosaici di San Vitale|Giustiniano e Teodora a Ravenna|Basilica di San Vitale\nA Santa Sofia|la grande cupola di Costantinopoli|Basilica di Santa Sofia\n@600|700|La nascita dell'Islam\nE 622|Maometto lascia La Mecca per Medina: l'Egira segna l'inizio del calendario islamico|Egira\nE 632|Muore Maometto; gli Arabi iniziano grandi conquiste|Maometto\nE 618|In Cina inizia la dinastia Tang|Dinastia Tang\nE 643|Il re longobardo Rotari mette per iscritto le leggi del suo popolo|Editto di Rotari\nE 691|A Gerusalemme si completa la Cupola della Roccia|Cupola della Roccia\nE c. 625|In Inghilterra un re viene sepolto in una nave a Sutton Hoo|Sutton Hoo\nI Fuoco greco|l'arma incendiaria di Bisanzio|Fuoco greco\nI Zero|Brahmagupta scrive le regole per calcolare con lo zero|Brahmagupta\nA Corano|il libro sacro dell'Islam|Corano\nA Elmo di Sutton Hoo|ferro e bronzo anglosassone|Sutton Hoo\n@700|800|Arabi in Spagna, Franchi in Europa\nE 711|Gli Arabi attraversano lo stretto di Gibilterra e conquistano la Spagna|Al-Andalus\nE 732|Carlo Martello ferma gli Arabi a Poitiers|Battaglia di Poitiers (732)\nE 762|Gli Abbasidi fondano Baghdad|Baghdad\nE 774|Carlo Magno sconfigge i Longobardi e diventa loro re|Carlo Magno\nE 793|I Vichinghi saccheggiano il monastero di Lindisfarne|Vichinghi\nE 751|A Talas gli Arabi imparano dai Cinesi a fare la carta|Battaglia del Talas\nI Carta in Occidente|da Samarcanda a Baghdad|Carta\nI Stampa a blocchi|in Asia orientale si stampano testi con tavolette di legno|Xilografia\nA Libro di Kells|il Vangelo miniato irlandese|Libro di Kells\nA Borobudur|il grande tempio buddista di Giava|Borobudur\n@800|900|Carlo Magno e i Vichinghi\nE 800|La notte di Natale Carlo Magno è incoronato imperatore a Roma|Carlo Magno\nE 843|Il trattato di Verdun divide l'impero carolingio|Trattato di Verdun\nE 827|Gli Arabi iniziano la conquista della Sicilia|Emirato di Sicilia\nE 863|Cirillo e Metodio portano la scrittura agli Slavi|Cirillo e Metodio\nE c. 802|Jayavarman II fonda l'impero khmer|Impero Khmer\nE c. 830|Fiorisce a Baghdad la Casa della Sapienza|Casa della Sapienza\nI Algebra|al-Khwarizmi scrive il libro che le dà il nome|Al-Khwarizmi\nI Polvere da sparo|alchimisti cinesi la scoprono|Polvere da sparo\nA Sutra del Diamante|il più antico libro stampato con una data|Sutra del Diamante\nA Salterio di Utrecht|i salmi illustrati a penna|Salterio di Utrecht\n@900|1000|L'anno Mille\nE 962|Ottone I è incoronato imperatore: nasce il Sacro Romano Impero|Sacro Romano Impero\nE 910|Si fonda l'abbazia di Cluny|Abbazia di Cluny\nE 929|Abd al-Rahman III proclama il califfato di Cordova|Califfato di Cordova\nE 960|In Cina inizia la dinastia Song|Dinastia Song\nE 969|I Fatimidi fondano Il Cairo|Il Cairo\nE 982|Erik il Rosso raggiunge la Groenlandia|Erik il Rosso\nE 988|Vladimir di Kiev si fa battezzare: la Rus' diventa cristiana|Battesimo della Rus'\nI Numeri arabi in Europa|Gerberto di Aurillac li fa conoscere|Papa Silvestro II\nI Astrolabio|strumento per misurare stelle e ore|Astrolabio\nA Moschea di Cordova|la foresta di archi bianchi e rossi|Mezquita di Cordova\nA Codici miniati ottoniani|i manoscritti d'oro dell'impero|Arte ottoniana\n@1000|1100|Normanni e crociati\nE c. 1000|Leif Erikson arriva in America del Nord|Leif Erikson\nE 1054|Lo scisma separa la Chiesa di Roma da quella di Costantinopoli|Scisma d'Oriente\nE 1066|Guglielmo il Conquistatore vince a Hastings e conquista l'Inghilterra|Battaglia di Hastings\nE 1077|L'imperatore Enrico IV si umilia davanti al papa a Canossa|Umiliazione di Canossa\nE 1088|Nasce a Bologna la prima università|Università di Bologna\nE 1099|La prima crociata conquista Gerusalemme|Prima crociata\nI Bussola|Shen Kuo descrive l'ago magnetico|Bussola\nI Caratteri mobili|Bi Sheng stampa con caratteri di argilla|Bi Sheng\nA Arazzo di Bayeux|la conquista dell'Inghilterra ricamata|Arazzo di Bayeux\nA Storia di Genji|il romanzo di Murasaki Shikibu|Genji monogatari\nA Chanson de Roland|il poema epico francese|Chanson de Roland\n@1100|1200|Cattedrali e comuni\nE 1176|La Lega lombarda batte il Barbarossa a Legnano|Battaglia di Legnano\nE 1187|Il Saladino riconquista Gerusalemme|Saladino\nE 1163|A Parigi iniziano i lavori di Notre-Dame|Cattedrale di Notre-Dame\nE 1173|A Pisa si inizia il campanile, che pende già durante i lavori|Torre di Pisa\nE 1119|Nascono i Cavalieri templari|Cavalieri templari\nE c. 1150|In Cambogia si completa Angkor Wat|Angkor Wat\nI Mulino a vento|si diffonde in Europa|Mulino a vento\nI Università|Oxford e Parigi seguono Bologna|Università di Oxford\nA Angkor Wat|il più grande tempio del mondo|Angkor Wat\nA Gotico|vetrate e archi a sesto acuto|Architettura gotica\nA Ildegarda di Bingen|visioni e musica di una monaca|Ildegarda di Bingen\n@1200|1300|Mongoli e mercanti\nE 1206|Gengis Khan unisce i Mongoli e inizia le conquiste|Gengis Khan\nE 1204|La quarta crociata saccheggia Costantinopoli|Quarta crociata\nE 1215|In Inghilterra il re concede la Magna Carta|Magna Carta\nE 1224|Francesco d'Assisi scrive il Cantico delle creature|Francesco d'Assisi\nE 1258|I Mongoli distruggono Baghdad|Assedio di Baghdad (1258)\nE 1271|Marco Polo parte per la Cina di Kublai Khan|Marco Polo\nE c. 1235|Sundiata Keita fonda l'impero del Mali|Impero del Mali\nI Liber Abaci|Fibonacci porta i numeri indo-arabi ai mercanti|Liber Abaci\nI Occhiali|inventati in Toscana|Occhiali\nA Cantico delle creature|uno dei primi testi in volgare italiano|Cantico delle creature\nA Storie di san Francesco|gli affreschi della Basilica di Assisi|Basilica di San Francesco\nA Il Milione|i viaggi di Marco Polo|Il Milione\n@1300|1400|Dante e la peste nera\nE 1300|Bonifacio VIII proclama il primo Giubileo|Giubileo del 1300\nE 1309|Il papato si trasferisce ad Avignone|Cattività avignonese\nE 1337|Inizia la guerra dei cent'anni tra Francia e Inghilterra|Guerra dei cent'anni\nE 1347|La peste nera arriva in Europa e uccide un terzo della popolazione|Peste nera\nE 1368|In Cina la dinastia Ming caccia i Mongoli|Dinastia Ming\nE 1378|A Firenze si ribellano i Ciompi|Tumulto dei Ciompi\nE 1325|Gli Aztechi fondano Tenochtitlan|Tenochtitlán\nI Orologio meccanico|le prime torri con l'orologio|Orologio meccanico\nI Armi da fuoco|i cannoni arrivano sui campi di battaglia|Arma da fuoco\nA Divina Commedia|il poema di Dante Alighieri|Divina Commedia\nA Cappella degli Scrovegni|gli affreschi di Giotto a Padova|Cappella degli Scrovegni\nA Decameron|cento novelle di Giovanni Boccaccio|Decameron\n@1400|1500|Rinascimento e nuovo mondo\nE 1492|Cristoforo Colombo arriva in America|Cristoforo Colombo\nE 1453|Gli Ottomani conquistano Costantinopoli|Caduta di Costantinopoli\nE c. 1455|Gutenberg stampa la Bibbia a caratteri mobili|Bibbia di Gutenberg\nE 1436|Si completa la cupola di Brunelleschi a Firenze|Cupola del Brunelleschi\nE 1431|Giovanna d'Arco viene bruciata a Rouen|Giovanna d'Arco\nE 1498|Vasco da Gama raggiunge l'India per mare|Vasco da Gama\nE 1405|L'ammiraglio cinese Zheng He inizia i suoi grandi viaggi|Zheng He\nE 1469|Lorenzo il Magnifico guida Firenze|Lorenzo de' Medici\nI Stampa a caratteri mobili|i libri si moltiplicano in Europa|Stampa a caratteri mobili\nI Prospettiva|Brunelleschi e Alberti la regolano|Prospettiva\nA Nascita di Venere|dipinto di Sandro Botticelli|Nascita di Venere\nA Ultima Cena|il dipinto murale di Leonardo a Milano|Ultima Cena (Leonardo)\nA Cupola di Santa Maria del Fiore|il capolavoro di Brunelleschi|Cupola del Brunelleschi\n@1500|1550|Riforma e conquistadores\nE 1517|Martin Lutero affigge le 95 tesi: inizia la Riforma protestante|Riforma protestante\nE 1519|Parte la spedizione di Magellano, la prima a fare il giro del mondo|Ferdinando Magellano\nE 1521|Hernán Cortés conquista l'impero azteco|Conquista dell'impero azteco\nE 1527|I lanzichenecchi saccheggiano Roma|Sacco di Roma (1527)\nE 1532|Francisco Pizarro attacca l'impero inca|Conquista dell'impero inca\nE 1534|Enrico VIII si separa dalla Chiesa di Roma|Chiesa d'Inghilterra\nE 1545|Si apre il Concilio di Trento|Concilio di Trento\nI Eliocentrismo|Copernico mette il Sole al centro|Niccolò Copernico\nI Anatomia|Vesalio pubblica il De humani corporis fabrica|Andrea Vesalio\nA Gioconda|ritratto di Leonardo da Vinci|Gioconda\nA Volta della Cappella Sistina|affreschi di Michelangelo|Volta della Cappella Sistina\nA Il Principe|trattato di Niccolò Machiavelli|Il Principe\nA Scuola di Atene|affresco di Raffaello|Scuola di Atene\n@1550|1600|Lepanto ed Elisabetta\nE 1571|Nella battaglia di Lepanto la Lega santa sconfigge la flotta ottomana|Battaglia di Lepanto\nE 1588|L'Invincibile Armata spagnola viene sconfitta dagli Inglesi|Invincibile Armata\nE 1572|Strage degli ugonotti nella notte di San Bartolomeo|Notte di San Bartolomeo\nE 1582|Papa Gregorio XIII introduce il calendario gregoriano|Calendario gregoriano\nE 1558|Elisabetta I diventa regina d'Inghilterra|Elisabetta I d'Inghilterra\nE 1598|L'editto di Nantes concede la libertà di culto in Francia|Editto di Nantes\nE 1590|Toyotomi Hideyoshi riunifica il Giappone|Toyotomi Hideyoshi\nI Microscopio|occhialai olandesi costruiscono il primo composto|Microscopio\nI Termoscopio|Galileo misura il caldo e il freddo|Termoscopio\nA Romeo e Giulietta|tragedia di William Shakespeare|Romeo e Giulietta\nA Gerusalemme liberata|poema di Torquato Tasso|Gerusalemme liberata\nA Ville del Palladio|le ville venete di Andrea Palladio|Ville palladiane del Veneto\n@1600|1650|Galileo e la guerra dei trent'anni\nE 1610|Galileo punta il cannocchiale al cielo e scopre i satelliti di Giove|Sidereus Nuncius\nE 1633|Galileo è processato e costretto ad abiurare|Processo a Galileo Galilei\nE 1618|Inizia la guerra dei trent'anni; finisce con la pace di Vestfalia nel 1648|Guerra dei trent'anni\nE 1620|I Padri Pellegrini sbarcano dalla Mayflower in America|Mayflower\nE 1603|In Giappone inizia lo shogunato Tokugawa|Shogunato Tokugawa\nE 1644|I Manciù conquistano Pechino e fondano la dinastia Qing|Dinastia Qing\nE 1649|In Inghilterra il re Carlo I viene decapitato|Carlo I d'Inghilterra\nE 1600|Giordano Bruno viene bruciato a Campo de' Fiori|Giordano Bruno\nI Telescopio|Galileo lo perfeziona|Telescopio\nI Circolazione del sangue|William Harvey la descrive|Circolazione sanguigna\nI Barometro|Torricelli misura la pressione dell'aria|Barometro\nA Don Chisciotte|romanzo di Miguel de Cervantes|Don Chisciotte della Mancia\nA La ronda di notte|dipinto di Rembrandt|La ronda di notte\nA L'Orfeo|opera di Claudio Monteverdi|L'Orfeo\nA Taj Mahal|il mausoleo d'amore ad Agra|Taj Mahal\n@1650|1700|Il Re Sole e Newton\nE 1687|Isaac Newton pubblica i Principia: la legge di gravitazione universale|Philosophiae Naturalis Principia Mathematica\nE 1682|Luigi XIV porta la corte a Versailles|Reggia di Versailles\nE 1665|La grande peste colpisce Londra; l'anno dopo un incendio la distrugge|Grande incendio di Londra\nE 1683|Gli Ottomani assediano Vienna e vengono respinti|Battaglia di Vienna\nE 1688|La Gloriosa rivoluzione limita il potere del re in Inghilterra|Gloriosa rivoluzione\nE 1682|Pietro il Grande diventa zar di Russia|Pietro I di Russia\nE 1692|Processi alle streghe di Salem|Processo alle streghe di Salem\nI Gravitazione universale|la stessa forza muove mele e pianeti|Legge di gravitazione universale\nI Microrganismi|Leeuwenhoek vede i batteri al microscopio|Antoni van Leeuwenhoek\nI Orologio a pendolo|Christiaan Huygens lo costruisce|Orologio a pendolo\nA Ragazza con l'orecchino di perla|dipinto di Jan Vermeer|Ragazza con l'orecchino di perla\nA Colonnato di San Pietro|l'abbraccio di Bernini|Piazza San Pietro\nA Il Paradiso perduto|poema di John Milton|Paradiso perduto\n@1700|1750|Vapore e Illuminismo\nE 1712|Thomas Newcomen costruisce la prima macchina a vapore funzionante|Macchina a vapore di Newcomen\nE 1703|Pietro il Grande fonda San Pietroburgo|San Pietroburgo\nE 1707|Inghilterra e Scozia si uniscono nel Regno di Gran Bretagna|Atto di Unione (1707)\nE 1713|La pace di Utrecht chiude la guerra di successione spagnola|Pace di Utrecht\nE 1720|I Savoia diventano re di Sardegna|Regno di Sardegna\nE 1738|Iniziano gli scavi di Ercolano; dieci anni dopo quelli di Pompei|Ercolano\nE 1740|Maria Teresa sale al trono d'Austria; Federico II su quello di Prussia|Maria Teresa d'Austria\nI Macchina a vapore|pompa l'acqua dalle miniere|Macchina a vapore\nI Scala Celsius|il termometro con lo zero e il cento|Grado Celsius\nI Classificazione dei viventi|Linneo dà a ogni specie due nomi|Linneo\nA Le quattro stagioni|concerti di Antonio Vivaldi|Le quattro stagioni\nA Robinson Crusoe|romanzo di Daniel Defoe|Robinson Crusoe\nA I viaggi di Gulliver|romanzo di Jonathan Swift|I viaggi di Gulliver\nA Vedute di Venezia|i canali dipinti da Canaletto|Canaletto\n@1750|1800|Le rivoluzioni\nE 1789|Il popolo di Parigi prende la Bastiglia: inizia la Rivoluzione francese|Rivoluzione francese\nE 1776|Le colonie americane dichiarano l'indipendenza|Dichiarazione d'indipendenza degli Stati Uniti d'America\nE 1769|James Watt brevetta la sua macchina a vapore: decolla la rivoluzione industriale|Rivoluzione industriale\nE 1755|Un terremoto e uno tsunami distruggono Lisbona|Terremoto di Lisbona del 1755\nE 1751|Esce il primo volume dell'Encyclopédie di Diderot e d'Alembert|Encyclopédie\nE 1770|James Cook arriva sulle coste dell'Australia|James Cook\nE 1796|Napoleone Bonaparte conquista l'Italia|Campagna d'Italia (1796-1797)\nE 1783|I fratelli Montgolfier fanno volare il primo pallone con persone a bordo|Fratelli Montgolfier\nI Vaccino|Edward Jenner protegge dal vaiolo|Edward Jenner\nI Parafulmine|Benjamin Franklin cattura il fulmine|Parafulmine\nI Mongolfiera|il primo volo umano|Mongolfiera\nA Don Giovanni|opera di Wolfgang Amadeus Mozart|Don Giovanni (Mozart)\nA Dei delitti e delle pene|saggio di Cesare Beccaria contro la pena di morte|Dei delitti e delle pene\nA Teatro alla Scala|il teatro di Milano apre nel 1778|Teatro alla Scala\n@1800|1850|Napoleone, ferrovie, Risorgimento\nE 1804|Napoleone si incorona imperatore dei Francesi|Napoleone Bonaparte\nE 1815|Napoleone è sconfitto a Waterloo; il Congresso di Vienna ridisegna l'Europa|Battaglia di Waterloo\nE 1825|Apre la prima ferrovia pubblica a vapore in Inghilterra|Ferrovia Stockton-Darlington\nE 1819|Simón Bolívar libera gran parte del Sudamerica dalla Spagna|Simón Bolívar\nE 1830|La Grecia ottiene l'indipendenza dall'impero ottomano|Guerra d'indipendenza greca\nE 1833|Il Regno Unito abolisce la schiavitù nel suo impero|Slavery Abolition Act\nE 1848|La \"primavera dei popoli\": rivoluzioni in tutta Europa, le Cinque giornate di Milano|Moti del 1848\nE 1839|Inizia la prima guerra dell'oppio tra Regno Unito e Cina|Prima guerra dell'oppio\nI Pila di Volta|la prima batteria elettrica|Pila di Volta\nI Fotografia|il dagherrotipo fissa le immagini|Dagherrotipo\nI Telegrafo|Morse invia il primo messaggio a distanza|Telegrafo\nA I promessi sposi|romanzo di Alessandro Manzoni|I promessi sposi\nA La grande onda di Kanagawa|stampa di Hokusai|La grande onda di Kanagawa\nA Nona sinfonia|di Ludwig van Beethoven|Sinfonia n. 9 (Beethoven)\nA Il 3 maggio 1808|dipinto di Francisco Goya|Il 3 maggio 1808\n@1850|1900|Nazioni, elettricità, cinema\nE 1861|Nasce il Regno d'Italia; Roma diventa capitale nel 1871|Unità d'Italia\nE 1861|Scoppia la guerra di secessione americana; nel 1865 la schiavitù è abolita|Guerra di secessione americana\nE 1859|Charles Darwin pubblica L'origine delle specie|L'origine delle specie\nE 1871|Nasce l'impero tedesco|Unificazione della Germania\nE 1869|Si apre il canale di Suez|Canale di Suez\nE 1868|In Giappone inizia l'era Meiji|Rinnovamento Meiji\nE 1884|La conferenza di Berlino spartisce l'Africa tra le potenze europee|Conferenza di Berlino (1884)\nE 1895|I fratelli Lumière proiettano il primo film|Fratelli Lumière\nE 1889|Si inaugura la Torre Eiffel|Torre Eiffel\nI Telefono|Meucci e Bell trasmettono la voce|Telefono\nI Lampadina|Edison la rende pratica|Lampada a incandescenza\nI Automobile|Karl Benz costruisce la prima a motore|Benz Patent-Motorwagen\nI Raggi X|Röntgen fotografa le ossa della mano|Raggi X\nI Tavola periodica|Mendeleev ordina gli elementi|Tavola periodica degli elementi\nA Impressione, levar del sole|il quadro che dà il nome all'Impressionismo|Impressione, levar del sole\nA Notte stellata|dipinto di Vincent van Gogh|Notte stellata\nA Aida|opera di Giuseppe Verdi|Aida\nA Le avventure di Pinocchio|romanzo di Carlo Collodi|Le avventure di Pinocchio\n@1900|1950|Le guerre mondiali\nE 1914|L'attentato di Sarajevo apre la prima guerra mondiale|Prima guerra mondiale\nE 1917|In Russia la Rivoluzione d'ottobre porta al potere i bolscevichi|Rivoluzione d'ottobre\nE 1922|La marcia su Roma porta Mussolini al governo|Marcia su Roma\nE 1929|Il crollo di Wall Street apre la Grande depressione|Crollo di Wall Street del 1929\nE 1939|La Germania invade la Polonia: inizia la seconda guerra mondiale|Seconda guerra mondiale\nE 1945|Le bombe atomiche su Hiroshima e Nagasaki; il 25 aprile l'Italia è liberata|Bombardamenti atomici di Hiroshima e Nagasaki\nE 1946|Gli italiani scelgono la Repubblica e le donne votano per la prima volta|Referendum istituzionale del 1946\nE 1903|I fratelli Wright compiono il primo volo a motore|Fratelli Wright\nE 1947|India e Pakistan diventano indipendenti|Partizione dell'India\nI Relatività|Albert Einstein cambia l'idea di spazio e tempo|Teoria della relatività\nI Radio|Marconi trasmette oltre l'Atlantico|Guglielmo Marconi\nI Penicillina|Alexander Fleming scopre il primo antibiotico|Penicillina\nI Fissione nucleare|l'atomo si spezza|Fissione nucleare\nA Guernica|dipinto di Pablo Picasso|Guernica (Picasso)\nA Ulisse|romanzo di James Joyce|Ulisse (romanzo)\nA Tempi moderni|film di Charlie Chaplin|Tempi moderni\nA Roma città aperta|film di Roberto Rossellini|Roma città aperta\n@1950|2000|Guerra fredda e Luna\nE 1969|Neil Armstrong è il primo uomo a camminare sulla Luna|Apollo 11\nE 1989|Cade il Muro di Berlino; nel 1991 si dissolve l'Unione Sovietica|Caduta del muro di Berlino\nE 1957|I Trattati di Roma creano la Comunità europea; l'URSS lancia lo Sputnik|Trattati di Roma\nE 1962|La crisi dei missili di Cuba porta il mondo sull'orlo della guerra nucleare|Crisi dei missili di Cuba\nE 1963|John F. Kennedy viene ucciso a Dallas|Assassinio di John F. Kennedy\nE 1968|Il Sessantotto: proteste in tutto il mondo, la Primavera di Praga|Sessantotto\nE 1978|Le Brigate Rosse rapiscono e uccidono Aldo Moro|Rapimento e omicidio di Aldo Moro\nE 1992|La mafia uccide Giovanni Falcone e Paolo Borsellino|Strage di Capaci\nE 1994|Nelson Mandela diventa presidente del Sudafrica|Nelson Mandela\nI DNA|Watson, Crick e Franklin scoprono la doppia elica|DNA\nI Transistor e microchip|l'elettronica entra in ogni casa|Circuito integrato\nI Internet e Web|da ARPANET al World Wide Web|World Wide Web\nI Personal computer|da Apple II all'IBM PC|Personal computer\nA La dolce vita|film di Federico Fellini|La dolce vita\nA Sgt. Pepper's|album dei Beatles|Sgt. Pepper's Lonely Hearts Club Band\nA Il nome della rosa|romanzo di Umberto Eco|Il nome della rosa\nA Cent'anni di solitudine|romanzo di Gabriel García Márquez|Cent'anni di solitudine\n@2000|2027|Il mondo connesso\nE 2001|L'11 settembre gli attentati di al-Qaida colpiscono New York e Washington|Attentati dell'11 settembre 2001\nE 2002|Le monete e le banconote in euro entrano nelle tasche degli europei|Euro\nE 2004|Uno tsunami nell'Oceano Indiano uccide oltre 220.000 persone|Maremoto dell'Oceano Indiano del 2004\nE 2008|Il fallimento di Lehman Brothers scatena la crisi finanziaria mondiale|Crisi finanziaria del 2007-2008\nE 2011|Primavere arabe; in Giappone il disastro di Fukushima|Primavera araba\nE 2015|L'accordo di Parigi impegna il mondo contro il cambiamento climatico|Accordo di Parigi\nE 2020|La pandemia di COVID-19 ferma il mondo|Pandemia di COVID-19\nE 2022|La Russia invade l'Ucraina|Invasione russa dell'Ucraina del 2022\nE 2025|Dopo la morte di papa Francesco è eletto Leone XIV, primo papa statunitense|Papa Leone XIV\nI Smartphone|l'iPhone mette Internet in tasca|IPhone\nI CRISPR|si può modificare il DNA con precisione|CRISPR\nI Bosone di Higgs|scoperto al CERN|Bosone di Higgs\nI Vaccini a mRNA|sviluppati in meno di un anno contro il COVID-19|Vaccino a RNA\nI Intelligenza artificiale|i modelli linguistici entrano nella vita quotidiana|Intelligenza artificiale\nA Il Signore degli Anelli|trilogia di Peter Jackson|Il Signore degli Anelli (serie di film)\nA L'amica geniale|romanzi di Elena Ferrante|L'amica geniale\nA La grande bellezza|film di Paolo Sorrentino, Oscar 2014|La grande bellezza\nA Gomorra|libro di Roberto Saviano|Gomorra (libro)\n";
+</script>
+<script>
+'use strict';
+
+// Tempo: tutta la storia in 42 tappe, più fitte man mano che ci si avvicina a oggi.
+// I testi delle tappe sono nella pagina (RAW); foto e riassunti arrivano da it.wikipedia
+// quando la rete lo permette, altrimenti al loro posto ci sono tessere grafiche.
+
+const DEG_PER_STOP = 12; // gradi tra una tappa e l'altra sull'arco
+const TOP_EVENTS = 4;
+const NOW = new Date().getFullYear();
+const WIKI = 'https://it.wikipedia.org';
+const PHOTO_CACHE = 'tempo:img:';
+
+const ERAS = [
+  { key: 'pre', name: 'Preistoria', from: -10000, to: -3000, step: '1.000 anni' },
+  { key: 'ant', name: 'Antichità', from: -3000, to: 500, step: '250 anni' },
+  { key: 'med', name: 'Medioevo', from: 500, to: 1500, step: '100 anni' },
+  { key: 'mod', name: 'Età moderna e contemporanea', short: 'Età moderna', from: 1500, to: 99999, step: '50 anni' },
+];
+
+// Colori delle tessere per epoca: terre e ocra, terracotta e lapislazzuli, oro e porpora dei codici, poi la pittura a olio e il Novecento.
+const PALETTES = {
+  pre: [['#7a5a36', '#2a1d12'], ['#5e4a35', '#1f1810'], ['#8a6a3a', '#2e2312']],
+  ant: [['#9a4f2e', '#33190e'], ['#24497a', '#0d1a2e'], ['#a08035', '#382b10']],
+  med: [['#7a1f2b', '#2a0a0f'], ['#2a3a7a', '#0e1430'], ['#9a7a2a', '#33280c']],
+  mod: [['#4a3a2a', '#1a130c'], ['#3a4a3a', '#141a14'], ['#5a2e2e', '#1f0f0f']],
+  c20: [['#d0612b', '#4a1e0b'], ['#2a6fb0', '#0e2742'], ['#c43b6b', '#43122a']],
+};
+
+const $ = (id) => document.getElementById(id);
+const state = { i: null, pos: null, photos: {}, mosaicKey: '', photosOk: false, era: 1 };
+
+/* ---------- Dati ---------- */
+
+function parse(raw) {
+  const stops = [];
+  let cur = null;
+  raw.split('\n').forEach((line) => {
+    if (line.startsWith('@')) {
+      const [a, b, name] = line.slice(1).split('|');
+      cur = { start: Number(a), end: Number(b), name, e: [], i: [], a: [] };
+      stops.push(cur);
+      return;
+    }
+    if (!cur || line.length < 3) return;
+    const kind = line[0].toLowerCase();
+    const f = line.slice(2).split('|');
+    if (kind === 'e') cur.e.push({ date: f[0], text: f[1], wiki: f[2] || '' });
+    else if (cur[kind]) cur[kind].push({ title: f[0], desc: f[1] || '', wiki: f[2] || f[0] });
+  });
+  return stops;
+}
+const STOPS = parse(RAW);
+const LAST = STOPS.length - 1;
+const eraOf = (s) => ERAS.find((e) => s.start >= e.from && s.start < e.to);
+
+/* ---------- Anni ---------- */
+
+// Calendario olocenico: 1 d.C. = 10001, 1 a.C. = 10000 (l'anno zero non esiste).
+const toHE = (y) => (y < 0 ? y + 10001 : y + 10000);
+const yl = (y) => (y < 0 ? `${(-y).toLocaleString('it-IT')} a.C.` : `${y} d.C.`);
+function rangeLabel(s) {
+  if (s.end > NOW) return `${s.start}–oggi`;
+  if (s.end <= 1 && s.start < 0) return s.end === 1 ? `${yl(s.start)}–1 d.C.` : `${(-s.start).toLocaleString('it-IT')}–${(-s.end).toLocaleString('it-IT')} a.C.`;
+  if (s.start < 0) return `${yl(s.start)}–${yl(s.end)}`;
+  return `${s.start}–${s.end} d.C.`;
+}
+const chipLabel = (s) => (s.end > NOW ? `${s.start}–oggi` : s.start < 0 ? `${(-s.start).toLocaleString('it-IT')} a.C.` : String(s.start));
+const indexOfYear = (y) => {
+  const k = STOPS.findIndex((s) => y >= s.start && y < s.end);
+  return k < 0 ? (y < STOPS[0].start ? 0 : LAST) : k;
+};
+
+/* ---------- Tessere e foto ---------- */
+
+function hash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function colors(s, key) {
+  const pal = s.start >= 1900 ? PALETTES.c20 : PALETTES[eraOf(s).key];
+  return pal[hash(key) % pal.length];
+}
+const shortLabel = (t) => t.replace(/\s*\((?:[^)]*)\)\s*$/, '');
+
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const k in attrs) {
+    if (k === 'class') n.className = attrs[k];
+    else if (k === 'text') n.textContent = attrs[k];
+    else if (k === 'style') n.style.cssText = attrs[k];
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), attrs[k]);
+    else n.setAttribute(k, attrs[k]);
+  }
+  kids.flat().forEach((c) => c != null && n.append(c));
+  return n;
+}
+
+function tile(it, s) {
+  const [a, b] = colors(s, it.label);
+  const t = el('div', { class: 'tile' });
+  t.style.setProperty('--a', a);
+  t.style.setProperty('--b', b);
+  const len = it.label.length;
+  t.style.setProperty('--fs', `${len > 34 ? 11 : len > 22 ? 13 : len > 12 ? 15 : 19}px`);
+  t.append(el('div', {}, it.kicker ? el('div', { class: 'k', text: it.kicker }) : null, el('div', { class: 'l', text: it.label })));
+  return t;
+}
+
+const photoOf = (wiki) => (wiki && state.photos[wiki]) || null;
+const sized = (src, w) => src.replace(/\/\d+px-/, `/${w}px-`);
+
+function visual(it, s, w = 800) {
+  const p = photoOf(it.wiki);
+  if (!p) return tile(it, s);
+  const i = el('img', { src: sized(p, w), alt: it.label, loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
+  i.addEventListener('error', () => i.replaceWith(tile(it, s)));
+  return i;
+}
+
+// Le foto della tappa: una sola richiesta (pageimages di it.wikipedia). Fallisce in silenzio.
+async function loadPhotos(s) {
+  const titles = [...new Set([...s.e, ...s.i, ...s.a].map((x) => x.wiki).filter(Boolean))].slice(0, 50);
+  const missing = titles.filter((t) => !(t in state.photos));
+  if (!missing.length) return false;
+  const key = PHOTO_CACHE + s.start;
+  try {
+    const cached = JSON.parse(localStorage.getItem(key) || 'null');
+    if (cached) { Object.assign(state.photos, cached); state.photosOk = true; return true; }
+  } catch { /* niente cache */ }
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const url = `${WIKI}/w/api.php?` + new URLSearchParams({
+      action: 'query', format: 'json', formatversion: '2', origin: '*', redirects: '1',
+      prop: 'pageimages', piprop: 'thumbnail', pithumbsize: '800', pilimit: '50', titles: missing.join('|'),
+    });
+    const j = await (await fetch(url, { signal: ctl.signal })).json();
+    const q = j.query || {};
+    const alias = {};
+    (q.normalized || []).forEach((n) => { alias[n.from] = n.to; });
+    (q.redirects || []).forEach((n) => { alias[n.from] = n.to; });
+    const byTitle = {};
+    (q.pages || []).forEach((p) => {
+      if (p.thumbnail && !/flag|bandiera|stemma|coat[_ ]of|logo|map[_.]|mappa|locator|\.svg/i.test(p.thumbnail.source)) byTitle[p.title] = p.thumbnail.source;
+    });
+    const found = {};
+    missing.forEach((t) => {
+      let f = t;
+      for (let k = 0; k < 3 && alias[f]; k++) f = alias[f];
+      found[t] = byTitle[f] || '';
+    });
+    Object.assign(state.photos, found);
+    state.photosOk = true;
+    try { localStorage.setItem(key, JSON.stringify(found)); } catch { /* piena */ }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------- Scheda Wikipedia ---------- */
+
+const wikiUrl = (t) => `${WIKI}/wiki/${encodeURIComponent(t.replace(/ /g, '_'))}`;
+
+async function openSheet(it, s) {
+  $('shTitle').textContent = it.label;
+  $('shSrc').textContent = it.kicker || '';
+  $('shTxt').textContent = it.text || '';
+  $('shLink').href = wikiUrl(it.wiki);
+  $('shPic').replaceChildren(visual(it, s, 1000));
+  const d = $('sheet');
+  if (d.showModal) d.showModal();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await fetch(`${WIKI}/api/rest_v1/page/summary/${encodeURIComponent(it.wiki.replace(/ /g, '_'))}`, { signal: ctl.signal });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    if ($('shTitle').textContent !== it.label) return;
+    if (j.extract) {
+      $('shTxt').textContent = j.extract;
+      $('shSrc').textContent = `${it.kicker ? it.kicker + ' · ' : ''}da Wikipedia: ${j.title}`;
+    }
+    const src = (j.originalimage && j.thumbnail && j.thumbnail.source) || (j.thumbnail && j.thumbnail.source);
+    if (src) {
+      const i = el('img', { src, alt: j.title, referrerpolicy: 'no-referrer' });
+      i.addEventListener('load', () => $('shPic').replaceChildren(i));
+    }
+  } catch { /* resta il testo della tappa */ } finally { clearTimeout(timer); }
+}
+
+/* ---------- Mosaico ---------- */
+
+function mosaicItems(s) {
+  const items = [];
+  s.e.forEach((e) => items.push({ label: shortLabel(e.wiki || e.text), kicker: e.date, wiki: e.wiki }));
+  s.i.forEach((x) => items.push({ label: x.title, kicker: 'scoperta', wiki: x.wiki }));
+  s.a.forEach((x) => items.push({ label: x.title, kicker: 'opera', wiki: x.wiki }));
+  return items.map((it) => [hash(it.label + s.start), it]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
+}
+
+function renderMosaic(s) {
+  const items = mosaicItems(s);
+  const key = `${s.start}:${Object.keys(state.photos).length}`;
+  if (key === state.mosaicKey) return;
+  state.mosaicKey = key;
+  const box = $('mosaic');
+  const old = [...box.children];
+  const stage = $('stage');
+  const cols = Math.max(3, Math.min(6, Math.round(box.clientWidth / 150)));
+  const colW = box.clientWidth / cols;
+  const ratios = [3 / 4, 1, 4 / 5, 4 / 3, 2 / 3];
+  const layer = el('div', { class: 'layer' });
+  for (let c = 0; c < cols; c++) {
+    const seq = [];
+    let h = 0;
+    for (let k = 0; h < stage.clientHeight * 1.15 || seq.length < 3; k++) {
+      const r = ratios[(c + k) % ratios.length];
+      seq.push({ it: items[(c + k * cols) % items.length], r });
+      h += colW / r + 6;
+      if (k > 40) break;
+    }
+    const track = el('div', { class: 'track' });
+    track.style.setProperty('--dur', `${Math.round(h / 9) + c * 7}s`);
+    track.style.animationDelay = `-${c * 11}s`;
+    [...seq, ...seq].forEach(({ it, r }) => {
+      const p = photoOf(it.wiki);
+      let n;
+      if (p) {
+        n = el('img', { class: 'ph', src: sized(p, 400), alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
+        n.addEventListener('error', () => { const f = tile(it, s); f.style.aspectRatio = String(r); n.replaceWith(f); });
+      } else n = tile(it, s);
+      n.style.aspectRatio = String(r);
+      track.append(n);
+    });
+    layer.append(el('div', { class: 'col' }, track));
+  }
+  box.append(layer);
+  requestAnimationFrame(() => requestAnimationFrame(() => layer.classList.add('in')));
+  setTimeout(() => old.forEach((n) => n.remove()), 1100);
+}
+
+/* ---------- Sezioni ---------- */
+
+function eventItem(e, s, lead) {
+  const it = { label: shortLabel(e.wiki || e.text), kicker: e.date, wiki: e.wiki, text: e.text };
+  const btn = el('button', { type: 'button', class: 'open', onclick: () => openSheet(it, s) },
+    lead ? el('div', { class: 'vis', style: 'aspect-ratio:16/10;margin-bottom:10px' }, visual(it, s)) : null,
+    el('span', { class: 'date', text: e.date }), el('p', { text: e.text }),
+    el('span', { class: 'wk', text: 'Wikipedia →' }));
+  return el('li', { class: lead ? 'lead' : '' }, btn);
+}
+
+function renderEvents(s) {
+  const list = $('events');
+  list.innerHTML = '';
+  $('eCount').textContent = `${s.e.length} in tutto`;
+  s.e.slice(0, TOP_EVENTS).forEach((e, k) => list.append(eventItem(e, s, k === 0)));
+  const more = $('eMore');
+  if (s.e.length <= TOP_EVENTS) { more.hidden = true; return; }
+  more.hidden = false;
+  more.textContent = `Vedi tutto (${s.e.length})`;
+  more.onclick = () => {
+    more.hidden = true;
+    s.e.slice(TOP_EVENTS).forEach((e) => { const li = eventItem(e, s, false); li.classList.add('extra'); list.append(li); });
+  };
+}
+
+function renderList(s, key, listId, kicker) {
+  const list = $(listId);
+  list.innerHTML = '';
+  $(`${key}Count`).textContent = String(s[key].length);
+  s[key].forEach((x) => {
+    const it = { label: x.title, kicker, wiki: x.wiki, text: x.desc };
+    list.append(el('li', {}, el('button', { type: 'button', class: 'open', onclick: () => openSheet(it, s) },
+      el('div', { class: 'thumb' }, visual(it, s, 160)),
+      el('div', {}, el('strong', { text: x.title }), el('span', { class: 'desc', text: x.desc })))));
+  });
+}
+
+function renderPeriod(s) {
+  const era = eraOf(s);
+  $('pRange').textContent = `${era.name} · ${rangeLabel(s)}`;
+  $('pName').textContent = s.name;
+  $('stopsHead').textContent = `${era.name}: tappe di ${era.step}`;
+  const box = $('chips');
+  box.innerHTML = '';
+  STOPS.forEach((t, k) => {
+    if (eraOf(t) !== era) return;
+    box.append(el('button', { type: 'button', text: chipLabel(t), 'aria-current': String(t === s), onclick: () => go(k) }));
+  });
+  const ix = ERAS.indexOf(era);
+  const prev = ERAS[ix - 1], next = ERAS[ix + 1];
+  $('eraPrev').disabled = !prev;
+  $('eraNext').disabled = !next;
+  if (prev) { $('eraPrev').textContent = `← ${prev.name}`; $('eraPrev').onclick = () => go(indexOfYear(prev.to - 1)); }
+  if (next) { $('eraNext').textContent = `${next.name} →`; $('eraNext').onclick = () => go(indexOfYear(next.from)); }
+}
+
+function renderAll(s) {
+  document.title = `${rangeLabel(s)} · Tempo`;
+  renderMosaic(s);
+  renderPeriod(s);
+  renderEvents(s);
+  renderList(s, 'i', 'inventions', 'scoperta');
+  renderList(s, 'a', 'art', 'opera');
+  $('photoNote').textContent = state.photosOk
+    ? 'Foto e riassunti dalle voci di Wikipedia collegate a ogni elemento.'
+    : 'Foto e riassunti arrivano da Wikipedia quando l\'app è pubblicata su un sito normale. Qui la rete esterna è bloccata, quindi al posto delle foto ci sono tessere con i colori dell\'epoca.';
+  const m = $('main');
+  m.classList.remove('swap');
+  void m.offsetWidth;
+  m.classList.add('swap');
+}
+
+/* ---------- Navigazione ---------- */
+
+async function go(k, { push = true } = {}) {
+  k = Math.max(0, Math.min(LAST, Math.round(k)));
+  if (state.pos === null || Math.round(state.pos) !== k) setPos(k);
+  if (k === state.i) return;
+  state.i = k;
+  const s = STOPS[k];
+  if (push) { try { history.replaceState(null, '', `#${s.start}`); } catch { /* cornice */ } }
+  try { localStorage.setItem('tempo:last', String(s.start)); } catch { /* ignora */ }
+  renderAll(s);
+  if (await loadPhotos(s) && state.i === k) renderAll(s);
+}
+
+/* ---------- Arco e righello ---------- */
+
+// pos è l'indice della tappa al centro dell'arco; è frazionario mentre si trascina.
+function setPos(p) {
+  p = Math.max(0, Math.min(LAST, p));
+  state.pos = p;
+  drawTicks(p);
+  const k = Math.round(p);
+  const s = STOPS[k];
+  const he = String(toHE(s.start));
+  if ($('heYear').textContent === he) return;
+  $('heYear').textContent = he;
+  $('realYear').textContent = rangeLabel(s);
+  const era = eraOf(s);
+  $('eraLine').textContent = `${era.short || era.name} · tappe di ${era.step}`;
+  const top = `${(k / LAST * 100).toFixed(3)}%`;
+  $('rMark').style.top = top;
+  if (tip) { tip.textContent = `${rangeLabel(s)}`; tip.style.top = top; }
+}
+
+// Una tacca per tappa, più lunga dove cambia l'epoca: ruotano con la ruota.
+const CX = 201, CY = 314, R = 201;
+function drawTicks(p) {
+  const parts = [];
+  const span = 95 / DEG_PER_STOP;
+  for (let t = Math.ceil(p - span); t <= p + span; t++) {
+    if (t < 0 || t > LAST) continue;
+    const a = (t - p) * DEG_PER_STOP * Math.PI / 180;
+    const big = t === 0 || eraOf(STOPS[t]) !== eraOf(STOPS[t - 1]);
+    const r1 = R - 2, r2 = R - (big ? 16 : 9);
+    const sx = Math.sin(a), cy = Math.cos(a);
+    parts.push(`<line${big ? ' class="big"' : ''} x1="${(CX + r1 * sx).toFixed(2)}" y1="${(CY - r1 * cy).toFixed(2)}" x2="${(CX + r2 * sx).toFixed(2)}" y2="${(CY - r2 * cy).toFixed(2)}"/>`);
+  }
+  $('dialTicks').innerHTML = parts.join('');
+}
+
+let commitTimer = 0;
+function commitSoon(ms = 250) {
+  clearTimeout(commitTimer);
+  commitTimer = setTimeout(() => go(Math.round(state.pos)), ms);
+}
+
+let tip = null;
+function buildDial() {
+  const dial = $('dial');
+  const pxPerStop = () => (dial.clientWidth / 402) * R * DEG_PER_STOP * Math.PI / 180;
+  let drag = null;
+  let fling = 0;
+  const hideHint = () => $('hint').classList.add('gone');
+
+  dial.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    cancelAnimationFrame(fling);
+    clearTimeout(commitTimer);
+    drag = { id: e.pointerId, x: e.clientX, last: e.clientX, t: performance.now(), v: 0, moved: false };
+  });
+  dial.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (!drag.moved && Math.abs(e.clientX - drag.x) < 6) return;
+    if (!drag.moved) { drag.moved = true; dial.classList.add('drag'); dial.setPointerCapture(e.pointerId); hideHint(); }
+    const now = performance.now();
+    const d = -(e.clientX - drag.last) / pxPerStop();
+    drag.v = d / Math.max(1, now - drag.t);
+    drag.last = e.clientX;
+    drag.t = now;
+    setPos(state.pos + d);
+  });
+  // Al rilascio la ruota prosegue per inerzia e poi si ferma sulla tappa più vicina.
+  const end = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    dial.classList.remove('drag');
+    if (!d.moved) return;
+    dial.dataset.justDragged = '1';
+    setTimeout(() => { delete dial.dataset.justDragged; }, 0);
+    let v = performance.now() - d.t > 80 ? 0 : d.v;
+    let prev = performance.now();
+    const stepFn = (now) => {
+      const dt = now - prev;
+      prev = now;
+      v *= Math.pow(0.992, dt);
+      if (Math.abs(v) < 0.0015 || state.pos <= 0 || state.pos >= LAST) { snap(); return; }
+      setPos(state.pos + v * dt);
+      fling = requestAnimationFrame(stepFn);
+    };
+    fling = requestAnimationFrame(stepFn);
+  };
+  const snap = () => {
+    const target = Math.round(state.pos);
+    const stepFn = () => {
+      const diff = target - state.pos;
+      if (Math.abs(diff) < 0.01) { setPos(target); commitSoon(0); return; }
+      setPos(state.pos + diff * 0.25);
+      fling = requestAnimationFrame(stepFn);
+    };
+    fling = requestAnimationFrame(stepFn);
+  };
+  dial.addEventListener('pointerup', end);
+  dial.addEventListener('pointercancel', (e) => { if (drag && drag.moved) end(e); else drag = null; });
+
+  $('yearBtn').addEventListener('click', () => { if (!dial.dataset.justDragged) openAsk(); });
+  $('down').addEventListener('click', () => $('main').scrollIntoView({ behavior: 'smooth' }));
+
+  $('stage').addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    cancelAnimationFrame(fling);
+    setPos(state.pos + e.deltaX / pxPerStop());
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(snap, 200);
+  }, { passive: false });
+
+  // Righello: tocca o trascina in verticale; le tappe sono a distanza uguale.
+  const ruler = $('ruler');
+  const track = $('rTrack');
+  STOPS.forEach((s, k) => {
+    const era = k === 0 || eraOf(s) !== eraOf(STOPS[k - 1]);
+    track.append(el('span', { class: `r-tick${era ? ' era' : ''}`, style: `top:${(k / LAST * 100).toFixed(3)}%` }));
+  });
+  tip = el('span', { class: 'r-tip' });
+  track.append(tip);
+  let rDrag = null;
+  const fromY = (clientY) => {
+    const r = track.getBoundingClientRect();
+    return Math.round(Math.max(0, Math.min(1, (clientY - r.top) / r.height)) * LAST);
+  };
+  ruler.addEventListener('pointerdown', (e) => {
+    rDrag = e.pointerId;
+    ruler.setPointerCapture(e.pointerId);
+    ruler.classList.add('drag');
+    cancelAnimationFrame(fling);
+    clearTimeout(commitTimer);
+    setPos(fromY(e.clientY));
+    hideHint();
+  });
+  ruler.addEventListener('pointermove', (e) => { if (rDrag === e.pointerId) setPos(fromY(e.clientY)); });
+  const rEnd = (e) => {
+    if (rDrag !== e.pointerId) return;
+    rDrag = null;
+    ruler.classList.remove('drag');
+    commitSoon(0);
+  };
+  ruler.addEventListener('pointerup', rEnd);
+  ruler.addEventListener('pointercancel', rEnd);
+}
+
+/* ---------- Finestra "vai all'anno" ---------- */
+
+function readPicker() {
+  const n = parseInt($('yearInput').value.replace(/\D/g, ''), 10);
+  return n ? n * state.era : null;
+}
+function syncAsk() {
+  $('eraBC').setAttribute('aria-pressed', String(state.era < 0));
+  $('eraAD').setAttribute('aria-pressed', String(state.era > 0));
+  const y = readPicker();
+  $('askHe').textContent = y ? `Tappa: ${rangeLabel(STOPS[indexOfYear(y)])}` : '';
+}
+function openAsk() {
+  const s = STOPS[state.i];
+  $('yearInput').value = String(Math.abs(s.start));
+  state.era = s.start < 0 ? -1 : 1;
+  syncAsk();
+  const d = $('ask');
+  if (d.showModal) d.showModal();
+  $('yearInput').select();
+}
+
+/* ---------- Avvio ---------- */
+
+function init() {
+  buildDial();
+  $('picker').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const y = readPicker();
+    $('ask').close();
+    if (y) go(indexOfYear(y));
+  });
+  $('yearInput').addEventListener('input', syncAsk);
+  $('askClose').addEventListener('click', () => $('ask').close());
+  $('eraBC').addEventListener('click', () => { state.era = -1; syncAsk(); });
+  $('eraAD').addEventListener('click', () => { state.era = 1; syncAsk(); });
+  $('shClose').addEventListener('click', () => $('sheet').close());
+  $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) $('sheet').close(); });
+  $('brand').addEventListener('click', (e) => { e.preventDefault(); go(indexOfYear(1950)); });
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input') || $('sheet').open || $('ask').open) return;
+    const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+    if (d) go(state.i + d);
+  });
+  window.addEventListener('hashchange', () => {
+    const y = parseInt(location.hash.slice(1), 10);
+    if (!Number.isNaN(y)) go(indexOfYear(y), { push: false });
+  });
+  let resizeT = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => { state.mosaicKey = ''; if (state.i !== null) renderMosaic(STOPS[state.i]); }, 300);
+  });
+  let start = parseInt(location.hash.slice(1), 10);
+  if (Number.isNaN(start)) { try { start = parseInt(localStorage.getItem('tempo:last'), 10); } catch { start = NaN; } }
+  go(indexOfYear(Number.isNaN(start) ? 1950 : start));
+}
+
+init();
+</script>
+
+</body>
+</html>
