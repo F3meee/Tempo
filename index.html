@@ -86,6 +86,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .r-track { position: relative; flex: 1; width: 37px; }
 .r-tick { position: absolute; right: 0; height: 1px; width: 14px; background: rgba(255,255,255,.5); }
 .r-tick.era { width: 30px; background: rgba(255,255,255,.9); }
+.r-era {
+  position: absolute; right: 40px; transform: translateY(-50%); white-space: nowrap; pointer-events: none;
+  font: 9px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.6);
+  text-shadow: 0 0 6px #000, 0 0 2px #000; transition: color .2s;
+}
+.r-era.on { color: #fff; }
+.ruler.drag .r-era { opacity: .35; }
 .r-mark {
   position: absolute; right: 0; width: 37px; height: 2px; margin-top: -1px; background: #fff;
   box-shadow: 0 0 6px rgba(255,255,255,.6); transition: top .25s ease;
@@ -187,6 +194,26 @@ main { padding-bottom: 40px; }
 .list .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .list strong { font-weight: 700; display: block; }
 .list span.desc { color: var(--muted); font-size: 14px; }
+
+.events li, .list li, .events, .list { min-width: 0; }
+.strip { max-width: 100%; display: flex; gap: 6px; overflow-x: auto; margin-top: 10px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.strip::-webkit-scrollbar { display: none; }
+.strip button { all: unset; flex: 0 0 auto; cursor: zoom-in; border-radius: 4px; overflow: hidden; }
+.strip button:focus-visible { outline: 2px solid var(--accent); }
+.strip img { height: 84px; width: auto; max-width: none; object-fit: cover; background: var(--surface); }
+.list .strip { margin-left: 76px; }
+.list .strip img { height: 60px; }
+.sheet .strip { padding: 10px 18px 0; margin: 0; }
+.sheet .strip img { height: 64px; }
+.lightbox { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 94vh; color: #fff; }
+.lightbox::backdrop { background: rgba(0,0,0,.94); }
+.lightbox img { max-width: 96vw; max-height: 80vh; margin: 0 auto; border-radius: 6px; }
+.lightbox p { text-align: center; font-size: 13px; margin: 10px auto 0; max-width: 60ch; color: #ccc; padding: 0 12px; }
+.lightbox .nav { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+.lightbox .close {
+  position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+  width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.15); color: #fff; font-size: 26px;
+}
 
 .foot { margin-top: 44px; color: var(--muted); font-size: 13px; line-height: 1.5; padding-block: 16px; border-top: 1px solid var(--line); }
 .foot p { margin: 0 0 8px; max-width: 62ch; }
@@ -300,6 +327,7 @@ main { padding-bottom: 40px; }
 
 <dialog class="sheet" id="sheet">
   <div class="pic" id="shPic"></div>
+  <div class="strip" id="shStrip"></div>
   <div class="body">
     <h3 id="shTitle"></h3>
     <p class="src" id="shSrc"></p>
@@ -309,6 +337,13 @@ main { padding-bottom: 40px; }
       <a class="go" id="shLink" href="#" target="_blank" rel="noopener">Apri su Wikipedia</a>
     </div>
   </div>
+</dialog>
+
+<dialog class="lightbox" id="lightbox">
+  <button class="close" id="lbClose" aria-label="Chiudi">×</button>
+  <img id="lbImg" alt="">
+  <p id="lbCap"></p>
+  <div class="nav"><button type="button" class="ghost" id="lbPrev">← Prima</button><button type="button" class="ghost" id="lbNext">Dopo →</button></div>
 </dialog>
 
 <dialog class="ask" id="ask">
@@ -363,7 +398,16 @@ const PALETTES = {
 };
 
 const $ = (id) => document.getElementById(id);
-const state = { i: null, pos: null, photos: {}, mosaicKey: '', photosOk: false, era: 1 };
+const state = { i: null, pos: null, photos: {}, gallery: {}, mosaicKey: '', photosOk: false, era: 1 };
+
+// Le grandi epoche scritte accanto al righello, all'altezza della loro prima tappa.
+const EPOCHS = [
+  { label: 'Preistoria', y: -10000 }, { label: 'Antichità', y: -3000 }, { label: 'Grecia classica', y: -500 },
+  { label: 'Impero romano', y: 1 }, { label: 'Medioevo', y: 500 }, { label: 'Rinascimento', y: 1400 },
+  { label: 'Età contemporanea', y: 1800 }, { label: 'Novecento', y: 1900 },
+];
+const GALLERY_CACHE = 'tempo:gal:';
+const BAD_IMG = /flag|bandiera|stemma|coat[_ ]of|logo|map[_.]|mappa|locator|icon|commons-|wiki|signature|firma|\.svg/i;
 
 /* ---------- Dati ---------- */
 
@@ -443,7 +487,8 @@ function tile(it, s) {
   return t;
 }
 
-const photoOf = (wiki) => (wiki && state.photos[wiki]) || null;
+const galleryOf = (wiki) => (wiki && state.gallery[wiki]) || [];
+const photoOf = (wiki) => (wiki && (state.photos[wiki] || (galleryOf(wiki)[0] || {}).src)) || null;
 const sized = (src, w) => src.replace(/\/\d+px-/, `/${w}px-`);
 
 function visual(it, s, w = 800) {
@@ -497,6 +542,79 @@ async function loadPhotos(s) {
   }
 }
 
+// Le gallerie: tutte le foto di ogni voce collegata (generator=images), poche richieste alla volta.
+async function fetchGallery(title, signal) {
+  const url = `${WIKI}/w/api.php?` + new URLSearchParams({
+    action: 'query', format: 'json', formatversion: '2', origin: '*', redirects: '1', titles: title,
+    generator: 'images', gimlimit: '40', prop: 'imageinfo', iiprop: 'url|mime|size', iiurlwidth: '600',
+  });
+  const j = await (await fetch(url, { signal })).json();
+  const pages = (j.query && j.query.pages) || [];
+  const first = state.photos[title];
+  const firstName = first ? decodeURIComponent(first.split('/').slice(-2, -1)[0] || '') : '';
+  const out = [];
+  pages.forEach((p) => {
+    const ii = p.imageinfo && p.imageinfo[0];
+    if (!ii || ii.mime !== 'image/jpeg' || ii.width < 300 || BAD_IMG.test(p.title)) return;
+    const name = p.title.replace(/^[^:]+:/, '');
+    if (name.replace(/ /g, '_') === firstName) return;
+    out.push({ src: ii.thumburl, name: name.replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') });
+  });
+  if (first) out.unshift({ src: first, name: title });
+  return out.slice(0, 12);
+}
+
+async function loadGalleries(s) {
+  const titles = [...new Set([...s.e, ...s.i, ...s.a].map((x) => x.wiki).filter(Boolean))];
+  const key = GALLERY_CACHE + s.start;
+  try {
+    const cached = JSON.parse(localStorage.getItem(key) || 'null');
+    if (cached) { Object.assign(state.gallery, cached); return true; }
+  } catch { /* niente cache */ }
+  const todo = titles.filter((t) => !(t in state.gallery));
+  if (!todo.length) return false;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 20000);
+  const found = {};
+  let ok = false;
+  const worker = async () => {
+    while (todo.length) {
+      const t = todo.shift();
+      try { found[t] = await fetchGallery(t, ctl.signal); ok = true; } catch { found[t] = []; }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  clearTimeout(timer);
+  if (!ok) return false;
+  Object.assign(state.gallery, found);
+  try { localStorage.setItem(key, JSON.stringify(found)); } catch { /* piena */ }
+  return true;
+}
+
+/* ---------- Galleria e foto grandi ---------- */
+
+const lb = { list: [], k: 0 };
+function showLightbox() {
+  const p = lb.list[lb.k];
+  $('lbImg').src = sized(p.src, 1280);
+  $('lbCap').textContent = `${p.name} · ${lb.k + 1} di ${lb.list.length}`;
+  $('lbPrev').hidden = lb.list.length < 2;
+  $('lbNext').hidden = lb.list.length < 2;
+}
+function openLightbox(list, k) {
+  lb.list = list;
+  lb.k = k;
+  showLightbox();
+  const d = $('lightbox');
+  if (!d.open && d.showModal) d.showModal();
+}
+function strip(pics, skip = 0) {
+  const list = pics.slice(skip);
+  if (!list.length) return null;
+  return el('div', { class: 'strip' }, list.map((p, k) => el('button', { type: 'button', 'aria-label': `Foto: ${p.name}`, onclick: () => openLightbox(pics, k + skip) },
+    el('img', { src: p.src, alt: p.name, loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer', onerror: (e) => e.target.parentNode.remove() }))));
+}
+
 /* ---------- Scheda Wikipedia ---------- */
 
 const wikiUrl = (t) => `${WIKI}/wiki/${encodeURIComponent(t.replace(/ /g, '_'))}`;
@@ -507,6 +625,7 @@ async function openSheet(it, s) {
   $('shTxt').textContent = it.text || '';
   $('shLink').href = wikiUrl(it.wiki);
   $('shPic').replaceChildren(visual(it, s, 1000));
+  $('shStrip').replaceChildren(...(strip(galleryOf(it.wiki)) ? [...strip(galleryOf(it.wiki)).childNodes] : []));
   const d = $('sheet');
   if (d.showModal) d.showModal();
   const ctl = new AbortController();
@@ -539,8 +658,16 @@ function mosaicItems(s) {
 }
 
 function renderMosaic(s) {
-  const items = mosaicItems(s);
-  const key = `${s.start}:${Object.keys(state.photos).length}`;
+  const base = mosaicItems(s);
+  // Con le gallerie ogni voce porta tutte le sue foto; senza rete restano le tessere.
+  const items = [];
+  base.forEach((it) => {
+    const pics = galleryOf(it.wiki);
+    if (pics.length) pics.slice(0, 6).forEach((p) => items.push({ ...it, src: p.src }));
+    else items.push({ ...it, src: photoOf(it.wiki) });
+  });
+  items.sort((p, q) => hash((p.src || p.label) + s.start) - hash((q.src || q.label) + s.start));
+  const key = `${s.start}:${Object.keys(state.photos).length}:${Object.keys(state.gallery).length}`;
   if (key === state.mosaicKey) return;
   state.mosaicKey = key;
   const box = $('mosaic');
@@ -563,7 +690,7 @@ function renderMosaic(s) {
     track.style.setProperty('--dur', `${Math.round(h / 9) + c * 7}s`);
     track.style.animationDelay = `-${c * 11}s`;
     [...seq, ...seq].forEach(({ it, r }) => {
-      const p = photoOf(it.wiki);
+      const p = it.src;
       let n;
       if (p) {
         n = el('img', { class: 'ph', src: sized(p, 400), alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
@@ -587,7 +714,7 @@ function eventItem(e, s, lead) {
     lead ? el('div', { class: 'vis', style: 'aspect-ratio:16/10;margin-bottom:10px' }, visual(it, s)) : null,
     el('span', { class: 'date', text: e.date }), el('p', { text: e.text }),
     el('span', { class: 'wk', text: 'Wikipedia →' }));
-  return el('li', { class: lead ? 'lead' : '' }, btn);
+  return el('li', { class: lead ? 'lead' : '' }, btn, strip(galleryOf(e.wiki), lead ? 1 : 0));
 }
 
 function renderEvents(s) {
@@ -613,7 +740,7 @@ function renderList(s, key, listId, kicker) {
     const it = { label: x.title, kicker, wiki: x.wiki, text: x.desc };
     list.append(el('li', {}, el('button', { type: 'button', class: 'open', onclick: () => openSheet(it, s) },
       el('div', { class: 'thumb' }, visual(it, s, 160)),
-      el('div', {}, el('strong', { text: x.title }), el('span', { class: 'desc', text: x.desc })))));
+      el('div', {}, el('strong', { text: x.title }), el('span', { class: 'desc', text: x.desc }))), strip(galleryOf(x.wiki), 1)));
   });
 }
 
@@ -644,7 +771,7 @@ function renderAll(s) {
   renderList(s, 'i', 'inventions', 'scoperta');
   renderList(s, 'a', 'art', 'opera');
   $('photoNote').textContent = state.photosOk
-    ? 'Foto e riassunti dalle voci di Wikipedia collegate a ogni elemento.'
+    ? 'Foto e riassunti dalle voci di Wikipedia collegate a ogni elemento. Tocca una foto per vederla grande.'
     : 'Foto e riassunti arrivano da Wikipedia quando l\'app è pubblicata su un sito normale. Qui la rete esterna è bloccata, quindi al posto delle foto ci sono tessere con i colori dell\'epoca.';
   const m = $('main');
   m.classList.remove('swap');
@@ -664,6 +791,7 @@ async function go(k, { push = true } = {}) {
   try { localStorage.setItem('tempo:last', String(s.start)); } catch { /* ignora */ }
   renderAll(s);
   if (await loadPhotos(s) && state.i === k) renderAll(s);
+  if (await loadGalleries(s) && state.i === k) renderAll(s);
 }
 
 /* ---------- Arco e righello ---------- */
@@ -684,6 +812,9 @@ function setPos(p) {
   const top = `${(k / LAST * 100).toFixed(3)}%`;
   $('rMark').style.top = top;
   if (tip) { tip.textContent = `${rangeLabel(s)}`; tip.style.top = top; }
+  let cur = null;
+  EPOCHS.forEach((ep) => { if (ep.k !== undefined && ep.k <= k) cur = ep; });
+  EPOCHS.forEach((ep) => ep.node && ep.node.classList.toggle('on', ep === cur));
 }
 
 // Una tacca per tappa, più lunga dove cambia l'epoca: ruotano con la ruota.
@@ -786,6 +917,12 @@ function buildDial() {
     const era = k === 0 || eraOf(s) !== eraOf(STOPS[k - 1]);
     track.append(el('span', { class: `r-tick${era ? ' era' : ''}`, style: `top:${(k / LAST * 100).toFixed(3)}%` }));
   });
+  EPOCHS.forEach((ep) => {
+    const k = indexOfYear(ep.y);
+    ep.k = k;
+    ep.node = el('span', { class: 'r-era', text: ep.label, style: `top:${(k / LAST * 100).toFixed(3)}%` });
+    track.append(ep.node, el('span', { class: 'r-tick era', style: `top:${(k / LAST * 100).toFixed(3)}%` }));
+  });
   tip = el('span', { class: 'r-tip' });
   track.append(tip);
   let rDrag = null;
@@ -850,10 +987,14 @@ function init() {
   $('eraBC').addEventListener('click', () => { state.era = -1; syncAsk(); });
   $('eraAD').addEventListener('click', () => { state.era = 1; syncAsk(); });
   $('shClose').addEventListener('click', () => $('sheet').close());
+  $('lbClose').addEventListener('click', () => $('lightbox').close());
+  $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox')) $('lightbox').close(); });
+  $('lbPrev').addEventListener('click', () => { lb.k = (lb.k - 1 + lb.list.length) % lb.list.length; showLightbox(); });
+  $('lbNext').addEventListener('click', () => { lb.k = (lb.k + 1) % lb.list.length; showLightbox(); });
   $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) $('sheet').close(); });
   $('brand').addEventListener('click', (e) => { e.preventDefault(); go(indexOfYear(1950)); });
   document.addEventListener('keydown', (e) => {
-    if (e.target.matches('input') || $('sheet').open || $('ask').open) return;
+    if (e.target.matches('input') || $('sheet').open || $('ask').open || $('lightbox').open) return;
     const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
     if (d) go(state.i + d);
   });
